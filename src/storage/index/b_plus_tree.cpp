@@ -395,31 +395,34 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
     }
   }
 
-  // Shrink the tree if the root internal page has only one child left.
-  size_t root_pos = 0;
-  while (root_pos < ctx.write_set_.size()) {
-    auto *page = ctx.write_set_[root_pos].template As<BPlusTreePage>();
-    if (page->IsLeafPage() || page->GetSize() > 1) {
+  // Release every latch held on the descent path, then reconcile the new root.
+  ctx.write_set_.clear();
+
+  page_id_t new_root = header->root_page_id_;
+  while (new_root != INVALID_PAGE_ID) {
+    WritePageGuard root_guard = bpm_->WritePage(new_root);
+    auto *page = root_guard.template As<BPlusTreePage>();
+    if (page->IsLeafPage()) {
+      if (page->GetSize() == 0) {
+        // An emptied root leaf means the tree has no keys at all.
+        root_guard.Drop();
+        pending_deletes.push_back(new_root);
+        header->root_page_id_ = INVALID_PAGE_ID;
+        new_root = INVALID_PAGE_ID;
+      }
       break;
     }
-    const page_id_t old_root = ctx.write_set_[root_pos].GetPageId();
-    const page_id_t child = ctx.write_set_[root_pos].template As<InternalPage>()->ValueAt(0);
-    header->root_page_id_ = child;
-    pending_deletes.push_back(old_root);
-    root_pos++;
-  }
-
-  // An emptied root leaf means the tree has no keys at all.
-  if (root_pos < ctx.write_set_.size()) {
-    auto *page = ctx.write_set_[root_pos].template As<BPlusTreePage>();
-    if (page->IsLeafPage() && page->GetSize() == 0) {
-      pending_deletes.push_back(ctx.write_set_[root_pos].GetPageId());
-      header->root_page_id_ = INVALID_PAGE_ID;
+    if (page->GetSize() > 1) {
+      break;
     }
+    // The root internal page has a single child: collapse it.
+    const page_id_t child = root_guard.template As<InternalPage>()->ValueAt(0);
+    root_guard.Drop();
+    pending_deletes.push_back(new_root);
+    header->root_page_id_ = child;
+    new_root = child;
   }
 
-  // Release every latch before freeing pages.
-  ctx.write_set_.clear();
   for (const page_id_t victim : pending_deletes) {
     bpm_->DeletePage(victim);
   }
