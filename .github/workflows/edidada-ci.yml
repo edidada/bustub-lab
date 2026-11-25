@@ -36,7 +36,7 @@ jobs:
             lru_k_replacer_test arc_replacer_test buffer_pool_manager_test \
             page_guard_test disk_scheduler_test \
             b_plus_tree_insert_test b_plus_tree_delete_test \
-            b_plus_tree_concurrent_test b_plus_tree_sequential_scale_test b_plus_tree_debug_delete_test
+            b_plus_tree_concurrent_test b_plus_tree_sequential_scale_test
 
       - name: "P1: LRU-K replacer"
         run: ctest --test-dir build --output-on-failure -R "LRUKReplacerTest"
@@ -55,9 +55,6 @@ jobs:
 
       - name: "P2: B+Tree insert and scan"
         run: ctest --test-dir build --output-on-failure -R "BasicInsertTest|InsertTest1NoIterator|InsertTest2"
-
-      - name: "P2: B+Tree debug dump"
-        run: ./build/test/b_plus_tree_debug_delete_test --gtest_filter=BPlusTreeDebug.DumpAfterEachRemove || true
 
       - name: "P2: B+Tree delete"
         run: ctest --test-dir build --output-on-failure -R "DeleteTestNoIterator|SequentialEdgeMixTest"
