@@ -29,7 +29,7 @@ namespace bustub {
 template <typename K, typename V, typename KC>
 void ExtendibleHTableBucketPage<K, V, KC>::Init(uint32_t max_size) {
   size_ = 0;
-  max_size_ = std::min(max_size, static_cast<uint32_t>(HTableBucketArraySize(sizeof(MappingType))));
+  max_size_ = std::min(max_size, static_cast<uint32_t>(HTableBucketArraySize(sizeof(std::pair<K, V>))));
 }
 
 /**
