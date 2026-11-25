@@ -31,6 +31,7 @@ class IndexIterator {
  public:
   // you may define your own constructor based on your member variables
   IndexIterator();
+  IndexIterator(std::shared_ptr<TracedBufferPoolManager> bpm, page_id_t page_id, int index);
   ~IndexIterator();  // NOLINT
 
   auto IsEnd() -> bool;
@@ -39,12 +40,18 @@ class IndexIterator {
 
   auto operator++() -> IndexIterator &;
 
-  auto operator==(const IndexIterator &itr) const -> bool { UNIMPLEMENTED("TODO(P2): Add implementation."); }
+  auto operator==(const IndexIterator &itr) const -> bool;
 
-  auto operator!=(const IndexIterator &itr) const -> bool { UNIMPLEMENTED("TODO(P2): Add implementation."); }
+  auto operator!=(const IndexIterator &itr) const -> bool;
 
  private:
-  // add your own private member variables here
+  /** @brief Advances past fully-tombstoned leaf pages, reloading the guard as needed. */
+  void SkipToValidEntry();
+
+  std::shared_ptr<TracedBufferPoolManager> bpm_;
+  page_id_t page_id_{INVALID_PAGE_ID};
+  int index_{0};
+  std::optional<ReadPageGuard> guard_;
 };
 
 }  // namespace bustub

@@ -73,6 +73,28 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   auto GetNextPageId() const -> page_id_t;
   void SetNextPageId(page_id_t next_page_id);
   auto KeyAt(int index) const -> KeyType;
+  auto ValueAt(int index) const -> ValueType;
+  auto KeyRefAt(int index) const -> const KeyType &;
+  auto ValueRefAt(int index) const -> const ValueType &;
+
+  /** @brief Insert a key/value pair at `index`, shifting the rest of the entries right. */
+  void InsertAt(int index, const KeyType &key, const ValueType &value);
+  /** @brief Remove the entry at `index`, shifting the rest of the entries left. */
+  void RemoveAt(int index);
+  /** @brief Whether the entry at `index` is logically deleted. */
+  auto IsTombstone(int index) const -> bool;
+  /** @brief Mark the entry at `index` as logically deleted. */
+  void AddTombstone(int index);
+  /** @brief Whether this page still has room for another tombstone. */
+  auto CanAddTombstone() const -> bool;
+  /** @brief Clear the tombstone marker of the entry at `index`, if any. */
+  void ClearTombstone(int index);
+  /** @brief Overwrite the value of the entry at `index`. */
+  void SetValueAt(int index, const ValueType &value);
+  /** @brief Physically remove every tombstoned entry (used before splits / merges). */
+  void PurgeTombstones();
+  /** @brief Move entries in [start, size) to `that`, appending them after its current entries. */
+  void MoveEntriesTo(BPlusTreeLeafPage *that, int start);
 
   /**
    * @brief for test only return a string representing all keys in

@@ -64,6 +64,14 @@ class BPlusTreeInternalPage : public BPlusTreePage {
 
   auto ValueAt(int index) const -> ValueType;
 
+  void SetValueAt(int index, const ValueType &value);
+
+  /** @brief Insert a (key, child) pair at `index`, shifting the rest of the entries right. */
+  void InsertAt(int index, const KeyType &key, const ValueType &value);
+
+  /** @brief Remove the (key, child) pair at `index`, shifting the rest of the entries left. */
+  void RemoveAt(int index);
+
   /**
    * @brief For test only, return a string representing all keys in
    * this internal page, formatted as "(key1,key2,key3,...)"

@@ -29,12 +29,14 @@ jobs:
             -DCMAKE_C_COMPILER=clang-18 \
             -DCMAKE_CXX_COMPILER=clang++-18
 
-      - name: "Build (bustub library and P1 tests)"
+      - name: "Build (P1 + P2 tests)"
         run: |
           cmake --build build -j"$(nproc)" --target bustub
           cmake --build build -j"$(nproc)" --target \
             lru_k_replacer_test arc_replacer_test buffer_pool_manager_test \
-            page_guard_test disk_scheduler_test
+            page_guard_test disk_scheduler_test \
+            b_plus_tree_insert_test b_plus_tree_delete_test \
+            b_plus_tree_concurrent_test b_plus_tree_sequential_scale_test
 
       - name: "P1: LRU-K replacer"
         run: ctest --test-dir build --output-on-failure -R "LRUKReplacerTest"
@@ -50,3 +52,15 @@ jobs:
 
       - name: "P1: buffer pool manager"
         run: ctest --test-dir build --output-on-failure -R "BufferPoolManagerTest"
+
+      - name: "P2: B+Tree insert and scan"
+        run: ctest --test-dir build --output-on-failure -R "BasicInsertTest|InsertTest1NoIterator|InsertTest2"
+
+      - name: "P2: B+Tree delete"
+        run: ctest --test-dir build --output-on-failure -R "DeleteTestNoIterator|SequentialEdgeMixTest"
+
+      - name: "P2: B+Tree concurrent"
+        run: ctest --test-dir build --output-on-failure -R "BPlusTreeConcurrentTest"
+
+      - name: "P2: B+Tree scale"
+        run: ctest --test-dir build --output-on-failure -R "BasicScaleTest"
