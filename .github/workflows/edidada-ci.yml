@@ -36,7 +36,9 @@ jobs:
             lru_k_replacer_test arc_replacer_test buffer_pool_manager_test \
             page_guard_test disk_scheduler_test \
             b_plus_tree_insert_test b_plus_tree_delete_test \
-            b_plus_tree_concurrent_test b_plus_tree_sequential_scale_test
+            b_plus_tree_concurrent_test b_plus_tree_sequential_scale_test \
+            extendible_htable_test extendible_htable_concurrent_test \
+            extendible_htable_page_test
 
       - name: "P1: LRU-K replacer"
         run: ctest --test-dir build --output-on-failure -R "LRUKReplacerTest"
@@ -64,3 +66,12 @@ jobs:
 
       - name: "P2: B+Tree scale"
         run: ctest --test-dir build --output-on-failure -R "BasicScaleTest"
+
+      - name: "P2: extendible hash table pages"
+        run: ctest --test-dir build --output-on-failure -R "BucketPageSampleTest|HeaderDirectoryPageSampleTest"
+
+      - name: "P2: extendible hash table"
+        run: ctest --test-dir build --output-on-failure -R "ExtendibleHTableTest.*InsertTest|ExtendibleHTableTest.*RemoveTest"
+
+      - name: "P2: extendible hash table concurrent"
+        run: ctest --test-dir build --output-on-failure -R "ExtendibleHTableConcurrentTest"
