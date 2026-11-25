@@ -128,6 +128,15 @@ auto TransactionManager::Commit(Transaction *txn) -> bool {
       auto tuple = table_heap->GetTupleWithLockAcquired(rid, page.AsMut<TablePage>()).second;
       meta.ts_ = commit_ts;
       table_heap->UpdateTupleInPlaceWithLockAcquired(meta, tuple, rid, page.AsMut<TablePage>());
+
+      if (meta.is_deleted_) {
+        // The deletion is now durable: drop the index entries so later scans do not resurrect this key.
+        for (const auto &index_info : catalog_->GetTableIndexes(table_info->name_)) {
+          auto key = tuple.KeyFromTuple(table_info->schema_, index_info->key_schema_,
+                                        index_info->index_->GetKeyAttrs());
+          index_info->index_->DeleteEntry(key, rid, txn);
+        }
+      }
     }
   }
 

@@ -66,24 +66,41 @@ auto InsertExecutor::Next(std::vector<bustub::Tuple> *tuple_batch, std::vector<b
     for (const auto &tuple : tuples) {
       const timestamp_t txn_temp_ts = txn == nullptr ? 0 : txn->GetTransactionTempTs();
 
-      // Duplicate primary key check has to happen *before* the tuple is written into the table heap.
+      // If every index key of this tuple already points at a *tombstone* slot, reuse that slot instead
+      // of appending a new one (this is how re-inserting a previously deleted key keeps working).
+      auto indexes = exec_ctx_->GetCatalog()->GetTableIndexes(table_info->name_);
       std::optional<RID> reuse_rid;
-      for (const auto &index_info : exec_ctx_->GetCatalog()->GetTableIndexes(table_info->name_)) {
-        if (!index_info->is_primary_key_ || txn == nullptr) {
-          continue;
+      bool can_reuse = txn != nullptr && !indexes.empty();
+      for (const auto &index_info : indexes) {
+        if (!can_reuse) {
+          break;
         }
         auto key = tuple.KeyFromTuple(table_info->schema_, index_info->key_schema_, index_info->index_->GetKeyAttrs());
         std::vector<RID> existing;
         index_info->index_->ScanKey(key, &existing, txn);
-        for (const auto &rid : existing) {
-          auto meta = table_heap->GetTupleMeta(rid);
-          if (meta.is_deleted_ && (meta.ts_ <= txn->GetReadTs() || meta.ts_ == txn_temp_ts)) {
-            reuse_rid = rid;  // insert into a tombstone: reuse the slot
-            break;
+        if (existing.size() != 1) {
+          can_reuse = false;  // no entry, or ambiguous: fall back to a normal insert
+          if (!existing.empty() && index_info->is_primary_key_) {
+            txn->SetTainted();
+            throw ExecutionException("duplicate primary key");
           }
-          txn->SetTainted();
-          throw ExecutionException("duplicate primary key");
+          break;
         }
+        auto rid = existing[0];
+        auto meta = table_heap->GetTupleMeta(rid);
+        if (!meta.is_deleted_ || (meta.ts_ > txn->GetReadTs() && meta.ts_ != txn_temp_ts)) {
+          can_reuse = false;
+          if (index_info->is_primary_key_) {
+            txn->SetTainted();
+            throw ExecutionException("duplicate primary key");
+          }
+          break;
+        }
+        if (reuse_rid.has_value() && !((*reuse_rid) == rid)) {
+          can_reuse = false;
+          break;
+        }
+        reuse_rid = rid;
       }
       if (reuse_rid.has_value()) {
         auto rid = *reuse_rid;
