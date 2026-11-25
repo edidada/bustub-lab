@@ -10,10 +10,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <memory>
-#include "common/macros.h"
-
 #include "execution/executors/delete_executor.h"
+
+#include <memory>
+#include <vector>
+
+#include "catalog/catalog.h"
+#include "common/macros.h"
+#include "type/value_factory.h"
 
 namespace bustub {
 
@@ -25,26 +29,64 @@ namespace bustub {
  */
 DeleteExecutor::DeleteExecutor(ExecutorContext *exec_ctx, const DeletePlanNode *plan,
                                std::unique_ptr<AbstractExecutor> &&child_executor)
-    : AbstractExecutor(exec_ctx) {
-  UNIMPLEMENTED("TODO(P3): Add implementation.");
-}
+    : AbstractExecutor(exec_ctx), plan_(plan), child_executor_(std::move(child_executor)) {}
 
 /** Initialize the delete */
-void DeleteExecutor::Init() { UNIMPLEMENTED("TODO(P3): Add implementation."); }
+void DeleteExecutor::Init() {
+  child_executor_->Init();
+  has_emitted_ = false;
+}
 
 /**
  * Yield the number of rows deleted from the table.
- * @param[out] tuple_batch The tuple batch with one integer indicating the number of rows deleted from the table
- * @param[out] rid_batch The next tuple RID batch produced by the delete (ignore, not used)
- * @param batch_size The number of tuples to be included in the batch (default: BUSTUB_BATCH_SIZE)
- * @return `true` if a tuple was produced, `false` if there are no more tuples
- *
- * NOTE: DeleteExecutor::Next() does not use the `rid_batch` out-parameter.
- * NOTE: DeleteExecutor::Next() returns true with the number of deleted rows produced only once.
  */
 auto DeleteExecutor::Next(std::vector<bustub::Tuple> *tuple_batch, std::vector<bustub::RID> *rid_batch,
                           size_t batch_size) -> bool {
-  UNIMPLEMENTED("TODO(P3): Add implementation.");
+  tuple_batch->clear();
+  rid_batch->clear();
+
+  if (has_emitted_) {
+    return false;
+  }
+
+  auto table_info = exec_ctx_->GetCatalog()->GetTable(plan_->GetTableOid());
+  BUSTUB_ASSERT(table_info != nullptr, "table not found");
+  auto *table_heap = table_info->table_.get();
+  auto *txn = exec_ctx_->GetTransaction();
+
+  int32_t count = 0;
+  std::vector<Tuple> tuples;
+  std::vector<RID> rids;
+  std::vector<std::pair<RID, Tuple>> targets;
+  while (child_executor_->Next(&tuples, &rids, BUSTUB_BATCH_SIZE)) {
+    for (size_t i = 0; i < rids.size(); i++) {
+      auto [meta, tuple] = table_heap->GetTuple(rids[i]);
+      if (meta.is_deleted_) {
+        continue;
+      }
+      targets.emplace_back(rids[i], tuple);
+    }
+  }
+
+  for (const auto &[rid, tuple] : targets) {
+    auto meta = table_heap->GetTupleMeta(rid);
+    if (meta.is_deleted_) {
+      continue;
+    }
+    table_heap->UpdateTupleMeta(TupleMeta{meta.ts_, true}, rid);
+    count++;
+    for (const auto &index_info : exec_ctx_->GetCatalog()->GetTableIndexes(table_info->name_)) {
+      auto *index = index_info->index_.get();
+      auto key = tuple.KeyFromTuple(table_info->schema_, *index->GetKeySchema(), index->GetKeyAttrs());
+      index->DeleteEntry(key, rid, txn);
+    }
+  }
+
+  has_emitted_ = true;
+  std::vector<Value> values;
+  values.emplace_back(ValueFactory::GetIntegerValue(count));
+  tuple_batch->emplace_back(Tuple(std::move(values), &GetOutputSchema()));
+  return true;
 }
 
 }  // namespace bustub

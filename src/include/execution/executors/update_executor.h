@@ -50,5 +50,8 @@ class UpdateExecutor : public AbstractExecutor {
 
   /** The child executor to obtain value from */
   std::unique_ptr<AbstractExecutor> child_executor_;
+
+  /** Whether the result row with the number of updated rows has been emitted */
+  bool has_emitted_{false};
 };
 }  // namespace bustub

@@ -12,6 +12,13 @@
 
 #include "execution/executors/sort_executor.h"
 
+#include <algorithm>
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "execution/execution_common.h"
+
 namespace bustub {
 
 /**
@@ -21,21 +28,41 @@ namespace bustub {
  */
 SortExecutor::SortExecutor(ExecutorContext *exec_ctx, const SortPlanNode *plan,
                            std::unique_ptr<AbstractExecutor> &&child_executor)
-    : AbstractExecutor(exec_ctx) {}
+    : AbstractExecutor(exec_ctx), plan_(plan), child_executor_(std::move(child_executor)) {}
 
 /** Initialize the sort */
-void SortExecutor::Init() { throw NotImplementedException("SortExecutor is not implemented"); }
+void SortExecutor::Init() {
+  child_executor_->Init();
+  sorted_tuples_.clear();
+  next_idx_ = 0;
+
+  const auto &child_schema = child_executor_->GetOutputSchema();
+  std::vector<Tuple> tuples;
+  std::vector<RID> rids;
+  while (child_executor_->Next(&tuples, &rids, BUSTUB_BATCH_SIZE)) {
+    for (const auto &tuple : tuples) {
+      sorted_tuples_.emplace_back(GenerateSortKey(tuple, plan_->GetOrderBy(), child_schema), tuple);
+    }
+  }
+
+  std::sort(sorted_tuples_.begin(), sorted_tuples_.end(), TupleComparator(plan_->GetOrderBy()));
+}
 
 /**
  * Yield the next tuple batch from the sort.
- * @param[out] tuple_batch The next tuple batch produced by the sort
- * @param[out] rid_batch The next tuple RID batch produced by the sort
- * @param batch_size The number of tuples to be included in the batch (default: BUSTUB_BATCH_SIZE)
- * @return `true` if a tuple was produced, `false` if there are no more tuples
  */
 auto SortExecutor::Next(std::vector<bustub::Tuple> *tuple_batch, std::vector<bustub::RID> *rid_batch, size_t batch_size)
     -> bool {
-  return false;
+  tuple_batch->clear();
+  rid_batch->clear();
+
+  while (next_idx_ < sorted_tuples_.size() && tuple_batch->size() < batch_size) {
+    tuple_batch->emplace_back(sorted_tuples_[next_idx_].second);
+    rid_batch->emplace_back(RID{});
+    next_idx_++;
+  }
+
+  return !tuple_batch->empty();
 }
 
 }  // namespace bustub

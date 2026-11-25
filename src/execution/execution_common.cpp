@@ -23,7 +23,35 @@ namespace bustub {
 TupleComparator::TupleComparator(std::vector<OrderBy> order_bys) : order_bys_(std::move(order_bys)) {}
 
 /** TODO(P3): Implement the comparison method */
-auto TupleComparator::operator()(const SortEntry &entry_a, const SortEntry &entry_b) const -> bool { return false; }
+auto TupleComparator::operator()(const SortEntry &entry_a, const SortEntry &entry_b) const -> bool {
+  const auto &key_a = entry_a.first;
+  const auto &key_b = entry_b.first;
+  BUSTUB_ASSERT(key_a.size() == order_bys_.size(), "sort key size mismatch");
+  BUSTUB_ASSERT(key_b.size() == order_bys_.size(), "sort key size mismatch");
+
+  for (size_t i = 0; i < order_bys_.size(); i++) {
+    const auto &value_a = key_a[i];
+    const auto &value_b = key_b[i];
+    const auto order_type = std::get<0>(order_bys_[i]);
+    if (value_a.CompareExactlyEquals(value_b)) {
+      continue;
+    }
+    // NULL values are ordered as the smallest value.
+    if (value_a.IsNull() || value_b.IsNull()) {
+      bool null_first = value_a.IsNull();
+      if (order_type == OrderByType::DESC) {
+        null_first = !null_first;
+      }
+      return null_first;
+    }
+    bool less = value_a.CompareLessThan(value_b) == CmpBool::CmpTrue;
+    if (order_type == OrderByType::DESC) {
+      return !less;
+    }
+    return less;
+  }
+  return false;
+}
 
 /**
  * Generate sort key for a tuple based on the order by expressions.
@@ -31,7 +59,12 @@ auto TupleComparator::operator()(const SortEntry &entry_a, const SortEntry &entr
  * TODO(P3): Implement this method.
  */
 auto GenerateSortKey(const Tuple &tuple, const std::vector<OrderBy> &order_bys, const Schema &schema) -> SortKey {
-  return {};
+  SortKey key;
+  key.reserve(order_bys.size());
+  for (const auto &order_by : order_bys) {
+    key.emplace_back(std::get<2>(order_by)->Evaluate(&tuple, &schema));
+  }
+  return key;
 }
 
 /**

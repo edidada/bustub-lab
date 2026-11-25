@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "execution/executor_context.h"
+#include "execution/execution_common.h"
 #include "execution/executors/abstract_executor.h"
 #include "execution/plans/sort_plan.h"
 #include "storage/table/tuple.h"
@@ -40,5 +41,14 @@ class SortExecutor : public AbstractExecutor {
  private:
   /** The sort plan node to be executed */
   const SortPlanNode *plan_;
+
+  /** The child executor from which tuples are obtained */
+  std::unique_ptr<AbstractExecutor> child_executor_;
+
+  /** The sorted output tuples */
+  std::vector<std::pair<SortKey, Tuple>> sorted_tuples_;
+
+  /** The index of the next tuple to be emitted */
+  size_t next_idx_{0};
 };
 }  // namespace bustub

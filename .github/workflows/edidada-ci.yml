@@ -75,3 +75,27 @@ jobs:
 
       - name: "P2: extendible hash table concurrent"
         run: ctest --test-dir build --output-on-failure -R "ExtendibleHTableConcurrentTest"
+
+      - name: "P3: build sqllogictest"
+        run: cmake --build build -j"$(nproc)" --target sqllogictest
+
+      - name: "P3: primer"
+        run: ./build/bin/bustub-sqllogictest test/sql/p3.00-primer.slt --verbose -d --in-memory
+
+      - name: "P3: seq scan"
+        run: ./build/bin/bustub-sqllogictest test/sql/p3.01-seqscan.slt --verbose -d --in-memory
+
+      - name: "P3: insert"
+        run: ./build/bin/bustub-sqllogictest test/sql/p3.02-insert.slt --verbose -d --in-memory
+
+      - name: "P3: update"
+        run: ./build/bin/bustub-sqllogictest test/sql/p3.03-update.slt --verbose -d --in-memory
+
+      - name: "P3: delete"
+        run: ./build/bin/bustub-sqllogictest test/sql/p3.04-delete.slt --verbose -d --in-memory
+
+      - name: "P3: sort and limit"
+        run: ./build/bin/bustub-sqllogictest test/sql/p3.16-sort-limit.slt --verbose -d --in-memory
+
+      - name: "P3: repeat execute"
+        run: ./build/bin/bustub-sqllogictest test/sql/p3.12-repeat-execute.slt --verbose -d --in-memory
