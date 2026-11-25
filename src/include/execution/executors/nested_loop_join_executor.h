@@ -71,8 +71,6 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
   /** Whether the current left tuple has produced at least one joined row */
   bool current_left_matched_{false};
 
-  /** The position of the next result tuple to be emitted */
-  size_t result_pos_{0};
 };
 
 }  // namespace bustub
