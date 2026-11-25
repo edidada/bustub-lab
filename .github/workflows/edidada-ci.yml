@@ -56,14 +56,14 @@ jobs:
       - name: "P2: B+Tree insert and scan"
         run: ctest --test-dir build --output-on-failure -R "BasicInsertTest|InsertTest1NoIterator|InsertTest2"
 
+      - name: "P2: B+Tree debug dump"
+        run: ./build/test/b_plus_tree_debug_delete_test --gtest_filter=BPlusTreeDebug.DumpAfterEachRemove || true
+
       - name: "P2: B+Tree delete"
         run: ctest --test-dir build --output-on-failure -R "DeleteTestNoIterator|SequentialEdgeMixTest"
 
       - name: "P2: B+Tree concurrent"
         run: ctest --test-dir build --output-on-failure -R "BPlusTreeConcurrentTest"
-
-      - name: "P2: B+Tree debug dump"
-        run: ./build/test/b_plus_tree_debug_delete_test --gtest_filter=BPlusTreeDebug.DumpAfterEachRemove || true
 
       - name: "P2: B+Tree scale"
         run: ctest --test-dir build --output-on-failure -R "BasicScaleTest"
