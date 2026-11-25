@@ -30,7 +30,8 @@ namespace bustub {
 FULL_INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::Init(int max_size) {
   SetPageType(IndexPageType::LEAF_PAGE);
-  SetMaxSize(max_size);
+  // Leave one spare slot so that an insertion into a full page can still shift entries right.
+  SetMaxSize(std::min(max_size, static_cast<int>(LEAF_PAGE_SLOT_CNT) - 1));
   SetSize(0);
   next_page_id_ = INVALID_PAGE_ID;
   num_tombstones_ = 0;

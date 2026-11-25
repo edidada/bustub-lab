@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <algorithm>
 #include <iostream>
 #include <sstream>
 
@@ -29,7 +30,8 @@ namespace bustub {
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
   SetPageType(IndexPageType::INTERNAL_PAGE);
-  SetMaxSize(max_size);
+  // Leave one spare slot so that an insertion into a full page can still shift entries right.
+  SetMaxSize(std::min(max_size, static_cast<int>(INTERNAL_PAGE_SLOT_CNT) - 1));
   SetSize(0);
 }
 
