@@ -113,7 +113,7 @@ auto TransactionManager::Commit(Transaction *txn) -> bool {
 
   // Turn every tuple written by this txn from its temporary timestamp into the commit timestamp.
   const auto temp_ts = txn->GetTransactionTempTs();
-  for (const auto &[oid, rids] : txn->GetWriteSet()->GetWriteSets()) {
+  for (const auto &[oid, rids] : txn->GetWriteSets()) {
     auto table_info = catalog_->GetTable(oid);
     if (table_info == nullptr) {
       continue;
@@ -121,13 +121,13 @@ auto TransactionManager::Commit(Transaction *txn) -> bool {
     auto table_heap = table_info->table_.get();
     for (const auto &rid : rids) {
       auto page = table_heap->AcquireTablePageWriteLock(rid);
-      auto meta = table_heap->GetTupleMetaWithLockAcquired(rid, page.As<TablePage>());
+      auto meta = table_heap->GetTupleMetaWithLockAcquired(rid, page.AsMut<TablePage>());
       if (meta.ts_ != temp_ts) {
         continue;  // somebody else already took care of this slot
       }
-      auto tuple = table_heap->GetTupleWithLockAcquired(rid, page.As<TablePage>()).second;
+      auto tuple = table_heap->GetTupleWithLockAcquired(rid, page.AsMut<TablePage>()).second;
       meta.ts_ = commit_ts;
-      table_heap->UpdateTupleInPlaceWithLockAcquired(meta, tuple, rid, page.As<TablePage>());
+      table_heap->UpdateTupleInPlaceWithLockAcquired(meta, tuple, rid, page.AsMut<TablePage>());
     }
   }
 
@@ -152,7 +152,7 @@ void TransactionManager::Abort(Transaction * txn) {
   }
 
   const auto temp_ts = txn->GetTransactionTempTs();
-  for (const auto &[oid, rids] : txn->GetWriteSet()->GetWriteSets()) {
+  for (const auto &[oid, rids] : txn->GetWriteSets()) {
     auto table_info = catalog_->GetTable(oid);
     if (table_info == nullptr) {
       continue;
@@ -162,7 +162,7 @@ void TransactionManager::Abort(Transaction * txn) {
     for (const auto &rid : rids) {
       auto my_logs = CollectMyUndoLogs(this, rid, txn);
       auto page = table_heap->AcquireTablePageWriteLock(rid);
-      auto [meta, tuple] = table_heap->GetTupleWithLockAcquired(rid, page.As<TablePage>());
+      auto [meta, tuple] = table_heap->GetTupleWithLockAcquired(rid, page.AsMut<TablePage>());
       if (meta.ts_ != temp_ts) {
         continue;
       }
@@ -170,7 +170,7 @@ void TransactionManager::Abort(Transaction * txn) {
         // The tuple was inserted by this txn: undo the insert by marking it deleted.
         meta.is_deleted_ = true;
         auto null_tuple = GenerateNullTuple(schema);
-        table_heap->UpdateTupleInPlaceWithLockAcquired(meta, null_tuple, rid, page.As<TablePage>());
+        table_heap->UpdateTupleInPlaceWithLockAcquired(meta, null_tuple, rid, page.AsMut<TablePage>());
         continue;
       }
       // Roll the tuple back to the state before this txn touched it.
@@ -178,11 +178,11 @@ void TransactionManager::Abort(Transaction * txn) {
       auto oldest = my_logs.back();
       TupleMeta restored_meta{oldest.ts_, oldest.is_deleted_};
       if (prev_tuple.has_value()) {
-        table_heap->UpdateTupleInPlaceWithLockAcquired(restored_meta, *prev_tuple, rid, page.As<TablePage>());
+        table_heap->UpdateTupleInPlaceWithLockAcquired(restored_meta, *prev_tuple, rid, page.AsMut<TablePage>());
       } else {
         restored_meta.is_deleted_ = true;
         auto null_tuple = GenerateNullTuple(schema);
-        table_heap->UpdateTupleInPlaceWithLockAcquired(restored_meta, null_tuple, rid, page.As<TablePage>());
+        table_heap->UpdateTupleInPlaceWithLockAcquired(restored_meta, null_tuple, rid, page.AsMut<TablePage>());
       }
       UpdateUndoLink(rid, oldest.prev_version_, nullptr);
     }
@@ -198,7 +198,8 @@ void TransactionManager::Abort(Transaction * txn) {
 void TransactionManager::GarbageCollection() {
   const auto watermark = GetWatermark();
 
-  // Step 1: cut the version chains at the watermark, and remember which txns are still referenced.
+  // Cut every version chain right below the newest undo log that is still visible at the watermark,
+  // and remember which txns still own reachable undo logs.
   std::unordered_set<txn_id_t> referenced_txns;
   for (const auto &table_name : catalog_->GetTableNames()) {
     auto table_info = catalog_->GetTable(table_name);
@@ -210,33 +211,49 @@ void TransactionManager::GarbageCollection() {
     while (!iter.IsEnd()) {
       auto rid = iter.GetRID();
       ++iter;
+      std::vector<std::pair<UndoLink, UndoLog>> chain;
       auto link = GetUndoLink(rid);
       while (link.has_value() && link->IsValid()) {
         auto log = GetUndoLogOptional(*link);
         if (!log.has_value()) {
           break;
         }
-        if (log->ts_ < watermark) {
-          // Everything from here on is older than the watermark: it can never be read again.
-          UpdateUndoLink(rid, std::nullopt, nullptr);
-          break;
-        }
-        referenced_txns.insert(link->prev_txn_);
+        chain.emplace_back(*link, *log);
         link = log->prev_version_;
+      }
+      auto base_meta = table_heap->GetTupleMeta(rid);
+      size_t keep = 0;
+      if (base_meta.ts_ > watermark && !chain.empty()) {
+        keep = chain.size();  // all logs are needed in the worst case
+        for (size_t i = 0; i < chain.size(); i++) {
+          if (chain[i].second.ts_ <= watermark) {
+            keep = i + 1;
+            break;
+          }
+        }
+      }
+      if (keep == 0) {
+        UpdateUndoLink(rid, std::nullopt, nullptr);
+      } else if (keep < chain.size()) {
+        auto boundary_log = chain[keep - 1].second;
+        boundary_log.prev_version_ = UndoLink{};
+        auto owner = txn_map_.find(chain[keep - 1].first.prev_txn_);
+        if (owner != txn_map_.end()) {
+          owner->second->ModifyUndoLog(chain[keep - 1].first.prev_log_idx_, boundary_log);
+        }
+      }
+      for (size_t i = 0; i < keep; i++) {
+        referenced_txns.insert(chain[i].first.prev_txn_);
       }
     }
   }
 
-  // Step 2: drop committed / aborted txns that nobody can reference any more.
+  // Drop committed / aborted txns that are no longer referenced by any version chain.
   std::unique_lock<std::shared_mutex> lck(txn_map_mutex_);
   for (auto it = txn_map_.begin(); it != txn_map_.end();) {
     auto &txn = it->second;
     if (txn->state_ == TransactionState::RUNNING || txn->state_ == TransactionState::TAINTED ||
         referenced_txns.find(txn->GetTransactionId()) != referenced_txns.end()) {
-      ++it;
-      continue;
-    }
-    if (txn->commit_ts_ >= watermark) {
       ++it;
       continue;
     }

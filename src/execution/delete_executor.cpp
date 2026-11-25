@@ -17,6 +17,9 @@
 
 #include "catalog/catalog.h"
 #include "common/macros.h"
+#include "common/exception.h"
+#include "concurrency/transaction_manager.h"
+#include "execution/execution_common.h"
 #include "type/value_factory.h"
 
 namespace bustub {
@@ -61,25 +64,35 @@ auto DeleteExecutor::Next(std::vector<bustub::Tuple> *tuple_batch, std::vector<b
   while (child_executor_->Next(&tuples, &rids, BUSTUB_BATCH_SIZE)) {
     for (size_t i = 0; i < rids.size(); i++) {
       auto [meta, tuple] = table_heap->GetTuple(rids[i]);
-      if (meta.is_deleted_) {
-        continue;
-      }
       targets.emplace_back(rids[i], tuple);
     }
   }
 
+  auto *txn_mgr = exec_ctx_->GetTransactionManager();
   for (const auto &[rid, tuple] : targets) {
-    auto meta = table_heap->GetTupleMeta(rid);
-    if (meta.is_deleted_) {
-      continue;
+    auto [base_meta, base_tuple, undo_link] = GetTupleAndUndoLink(txn_mgr, table_heap, rid);
+    if (txn != nullptr && IsWriteWriteConflict(base_meta, undo_link.value_or(UndoLink{}), txn->GetTransactionTempTs(),
+                                               txn->GetReadTs())) {
+      txn->SetTainted();
+      throw ExecutionException("write-write conflict on delete");
     }
-    table_heap->UpdateTupleMeta(TupleMeta{meta.ts_, true}, rid);
-    count++;
+    if (base_meta.is_deleted_) {
+      continue;  // already deleted by this txn
+    }
+
     for (const auto &index_info : exec_ctx_->GetCatalog()->GetTableIndexes(table_info->name_)) {
       auto *index = index_info->index_.get();
-      auto key = tuple.KeyFromTuple(table_info->schema_, *index->GetKeySchema(), index->GetKeyAttrs());
-      index->DeleteEntry(key, rid, txn);
+      // Under MVCC the index entry has to stay: older snapshots may still need to find this tuple.
+      (void)index;
     }
+
+    if (txn == nullptr) {
+      table_heap->UpdateTupleMeta(TupleMeta{base_meta.ts_, true}, rid);
+    } else {
+      ModifyTuple(txn_mgr, txn, table_heap, plan_->GetTableOid(), rid, &table_info->schema_, base_tuple, base_meta,
+                  undo_link, nullptr);
+    }
+    count++;
   }
 
   has_emitted_ = true;

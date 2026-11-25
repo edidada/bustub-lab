@@ -17,6 +17,8 @@
 #include <vector>
 
 #include "common/macros.h"
+#include "concurrency/transaction_manager.h"
+#include "execution/execution_common.h"
 
 namespace bustub {
 
@@ -94,16 +96,25 @@ auto IndexScanExecutor::Next(std::vector<bustub::Tuple> *tuple_batch, std::vecto
   while (rid_pos_ < rids_.size() && tuple_batch->size() < batch_size) {
     auto rid = rids_[rid_pos_++];
     auto [meta, tuple] = table_heap->GetTuple(rid);
-    if (meta.is_deleted_) {
+    auto *txn = exec_ctx_->GetTransaction();
+    std::optional<Tuple> visible;
+    if (txn == nullptr) {
+      if (!meta.is_deleted_) {
+        visible = std::move(tuple);
+      }
+    } else {
+      visible = GetTupleVisibleToTxn(exec_ctx_->GetTransactionManager(), table_heap, rid, &table_info_->schema_, txn);
+    }
+    if (!visible.has_value()) {
       continue;
     }
     if (plan_->filter_predicate_ != nullptr) {
-      auto pred = plan_->filter_predicate_->Evaluate(&tuple, plan_->OutputSchema());
+      auto pred = plan_->filter_predicate_->Evaluate(&(*visible), plan_->OutputSchema());
       if (pred.IsNull() || pred.GetAs<int8_t>() != 1) {
         continue;
       }
     }
-    tuple_batch->emplace_back(std::move(tuple));
+    tuple_batch->emplace_back(*visible);
     rid_batch->emplace_back(rid);
   }
 

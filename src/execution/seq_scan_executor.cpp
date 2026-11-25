@@ -11,8 +11,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "execution/executors/seq_scan_executor.h"
+
 #include "catalog/catalog.h"
 #include "common/macros.h"
+#include "execution/execution_common.h"
 
 namespace bustub {
 
@@ -26,9 +28,9 @@ SeqScanExecutor::SeqScanExecutor(ExecutorContext *exec_ctx, const SeqScanPlanNod
 
 /** Initialize the sequential scan */
 void SeqScanExecutor::Init() {
-  auto table_info = exec_ctx_->GetCatalog()->GetTable(plan_->GetTableOid());
-  BUSTUB_ASSERT(table_info != nullptr, "table not found");
-  table_heap_ = table_info->table_.get();
+  table_info_ = exec_ctx_->GetCatalog()->GetTable(plan_->GetTableOid());
+  BUSTUB_ASSERT(table_info_ != nullptr, "table not found");
+  table_heap_ = table_info_->table_.get();
   iterator_ = std::make_unique<TableIterator>(table_heap_->MakeEagerIterator());
 }
 
@@ -48,16 +50,26 @@ auto SeqScanExecutor::Next(std::vector<bustub::Tuple> *tuple_batch, std::vector<
     auto [meta, tuple] = iterator_->GetTuple();
     auto rid = iterator_->GetRID();
     ++(*iterator_);
-    if (meta.is_deleted_) {
+
+    auto *txn = exec_ctx_->GetTransaction();
+    std::optional<Tuple> visible;
+    if (txn == nullptr) {
+      if (!meta.is_deleted_) {
+        visible = tuple;
+      }
+    } else {
+      visible = GetTupleVisibleToTxn(exec_ctx_->GetTransactionManager(), table_heap_, rid, &table_info_->schema_, txn);
+    }
+    if (!visible.has_value()) {
       continue;
     }
     if (plan_->filter_predicate_ != nullptr) {
-      auto pred = plan_->filter_predicate_->Evaluate(&tuple, plan_->OutputSchema());
+      auto pred = plan_->filter_predicate_->Evaluate(&(*visible), plan_->OutputSchema());
       if (pred.IsNull() || pred.GetAs<int8_t>() != 1) {
         continue;
       }
     }
-    tuple_batch->emplace_back(tuple);
+    tuple_batch->emplace_back(*visible);
     rid_batch->emplace_back(rid);
   }
 

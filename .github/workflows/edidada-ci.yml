@@ -38,7 +38,8 @@ jobs:
             b_plus_tree_insert_test b_plus_tree_delete_test \
             b_plus_tree_concurrent_test b_plus_tree_sequential_scale_test \
             extendible_htable_test extendible_htable_concurrent_test \
-            extendible_htable_page_test
+            extendible_htable_page_test \
+            txn_scan_test txn_executor_test txn_timestamp_test txn_index_test
 
       - name: "P1: LRU-K replacer"
         run: ctest --test-dir build --output-on-failure -R "LRUKReplacerTest"
@@ -141,3 +142,15 @@ jobs:
 
       - name: "P3: window function"
         run: ./build/bin/bustub-sqllogictest test/sql/p3.20-window-function.slt --verbose -d --in-memory
+
+      - name: "P4: tuple reconstruction + undo log collection"
+        run: ./build/test/txn_scan_test --gtest_also_run_disabled_tests
+
+      - name: "P4: txn manager begin/commit/abort/gc"
+        run: ./build/test/txn_executor_test --gtest_also_run_disabled_tests
+
+      - name: "P4: watermark timestamps"
+        run: ./build/test/txn_timestamp_test --gtest_also_run_disabled_tests
+
+      - name: "P4: index mvcc"
+        run: ./build/test/txn_index_test --gtest_also_run_disabled_tests

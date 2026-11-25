@@ -13,8 +13,10 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <vector>
 
+#include "catalog/catalog.h"
 #include "execution/executor_context.h"
 #include "execution/executors/abstract_executor.h"
 #include "execution/plans/seq_scan_plan.h"
@@ -41,6 +43,8 @@ class SeqScanExecutor : public AbstractExecutor {
  private:
   /** The sequential scan plan node to be executed */
   const SeqScanPlanNode *plan_;
+  /** The table being scanned */
+  std::shared_ptr<TableInfo> table_info_{nullptr};
   /** The table heap of the scanned table */
   TableHeap *table_heap_{nullptr};
   /** The iterator pointing to the next tuple to be scanned */

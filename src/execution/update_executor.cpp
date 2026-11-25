@@ -18,6 +18,9 @@
 
 #include "catalog/catalog.h"
 #include "common/macros.h"
+#include "common/exception.h"
+#include "concurrency/transaction_manager.h"
+#include "execution/execution_common.h"
 #include "type/value_factory.h"
 
 namespace bustub {
@@ -54,7 +57,6 @@ auto UpdateExecutor::Next(std::vector<bustub::Tuple> *tuple_batch, std::vector<b
 
   auto *table_heap = table_info_->table_.get();
   auto *txn = exec_ctx_->GetTransaction();
-  auto *lock_mgr = exec_ctx_->GetLockManager();
   auto child_schema = child_executor_->GetOutputSchema();
 
   int32_t count = 0;
@@ -72,27 +74,49 @@ auto UpdateExecutor::Next(std::vector<bustub::Tuple> *tuple_batch, std::vector<b
     }
   }
 
+  auto *txn_mgr = exec_ctx_->GetTransactionManager();
+  auto indexes = exec_ctx_->GetCatalog()->GetTableIndexes(table_info_->name_);
+
+  // Pass 1: conflict check + drop the old index entries (all of them, before inserting new ones,
+  // otherwise primary-key updates that shift keys collide with each other).
+  std::vector<std::pair<RID, Tuple>> live;
   for (const auto &[rid, new_tuple] : targets) {
-    auto [old_meta, old_tuple] = table_heap->GetTuple(rid);
-    if (old_meta.is_deleted_) {
+    auto [base_meta, base_tuple, undo_link] = GetTupleAndUndoLink(txn_mgr, table_heap, rid);
+    if (txn != nullptr && IsWriteWriteConflict(base_meta, undo_link.value_or(UndoLink{}), txn->GetTransactionTempTs(),
+                                               txn->GetReadTs())) {
+      txn->SetTainted();
+      throw ExecutionException("write-write conflict on update");
+    }
+    if (base_meta.is_deleted_) {
       continue;
     }
-    table_heap->UpdateTupleMeta(TupleMeta{old_meta.ts_, true}, rid);
-    for (const auto &index_info : exec_ctx_->GetCatalog()->GetTableIndexes(table_info_->name_)) {
+    live.emplace_back(rid, new_tuple);
+    for (const auto &index_info : indexes) {
       auto *index = index_info->index_.get();
-      auto old_key = old_tuple.KeyFromTuple(table_info_->schema_, *index->GetKeySchema(), index->GetKeyAttrs());
+      auto old_key = base_tuple.KeyFromTuple(table_info_->schema_, *index->GetKeySchema(), index->GetKeyAttrs());
       index->DeleteEntry(old_key, rid, txn);
     }
+  }
 
-    auto new_rid = table_heap->InsertTuple(TupleMeta{0, false}, new_tuple, lock_mgr, txn, plan_->GetTableOid());
-    if (new_rid.has_value()) {
-      for (const auto &index_info : exec_ctx_->GetCatalog()->GetTableIndexes(table_info_->name_)) {
-        auto *index = index_info->index_.get();
-        auto new_key = new_tuple.KeyFromTuple(table_info_->schema_, *index->GetKeySchema(), index->GetKeyAttrs());
-        index->InsertEntry(new_key, new_rid.value(), txn);
-      }
+  // Pass 2: write the new versions.
+  for (const auto &[rid, new_tuple] : live) {
+    auto [base_meta, base_tuple, undo_link] = GetTupleAndUndoLink(txn_mgr, table_heap, rid);
+    if (txn == nullptr) {
+      table_heap->UpdateTupleInPlace(TupleMeta{base_meta.ts_, false}, new_tuple, rid);
+    } else {
+      ModifyTuple(txn_mgr, txn, table_heap, plan_->GetTableOid(), rid, &table_info_->schema_, base_tuple, base_meta,
+                  undo_link, &new_tuple);
     }
     count++;
+  }
+
+  // Pass 3: add the new index entries.
+  for (const auto &[rid, new_tuple] : live) {
+    for (const auto &index_info : indexes) {
+      auto *index = index_info->index_.get();
+      auto new_key = new_tuple.KeyFromTuple(table_info_->schema_, *index->GetKeySchema(), index->GetKeyAttrs());
+      index->InsertEntry(new_key, rid, txn);
+    }
   }
 
   has_emitted_ = true;

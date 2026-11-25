@@ -59,6 +59,19 @@ auto GenerateNewUndoLog(const Schema *schema, const Tuple *base_tuple, const Tup
 auto GenerateUpdatedUndoLog(const Schema *schema, const Tuple *base_tuple, const Tuple *target_tuple,
                             const UndoLog &log) -> UndoLog;
 
+/** @brief Whether writing this tuple would be a write-write conflict for `txn`. */
+auto IsWriteWriteConflict(const TupleMeta &meta, const UndoLink &undo_link, timestamp_t temp_ts, timestamp_t read_ts)
+    -> bool;
+
+/** @brief Apply an update / deletion to `rid`, generating or extending the undo log as needed. */
+void ModifyTuple(TransactionManager *txn_mgr, Transaction *txn, TableHeap *table_heap, table_oid_t oid, RID rid,
+                 const Schema *schema, const Tuple &base_tuple, const TupleMeta &base_meta,
+                 std::optional<UndoLink> undo_link, const Tuple *target_tuple);
+
+/** @brief Return the version of `rid` visible to `txn`, or std::nullopt if invisible. */
+auto GetTupleVisibleToTxn(TransactionManager *txn_mgr, TableHeap *table_heap, RID rid, const Schema *schema,
+                          Transaction *txn) -> std::optional<Tuple>;
+
 void TxnMgrDbg(const std::string &info, TransactionManager *txn_mgr, const TableInfo *table_info,
                TableHeap *table_heap);
 
