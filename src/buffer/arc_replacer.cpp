@@ -44,8 +44,9 @@ auto ArcReplacer::Evict() -> std::optional<frame_id_t> {
         continue;
       }
       auto status_ptr = alive->second;
+      const frame_id_t victim_frame_id = status_ptr->frame_id_;
       list.erase(it);
-      alive_map_.erase(*it);
+      alive_map_.erase(alive);
       curr_size_--;
       // Move the victim page into the corresponding ghost list.
       status_ptr->arc_status_ = status;
@@ -61,7 +62,7 @@ auto ArcReplacer::Evict() -> std::optional<frame_id_t> {
           mfu_ghost_.pop_front();
         }
       }
-      return status_ptr->frame_id_;
+      return victim_frame_id;
     }
     return std::nullopt;
   };
@@ -89,7 +90,7 @@ auto ArcReplacer::Evict() -> std::optional<frame_id_t> {
  */
 void ArcReplacer::RecordAccess(frame_id_t frame_id, page_id_t page_id, [[maybe_unused]] AccessType access_type) {
   std::lock_guard<std::mutex> lock(latch_);
-  if (frame_id < 0 || static_cast<size_t>(frame_id) >= replacer_size_) {
+  if (frame_id < 0) {
     throw Exception("ArcReplacer: invalid frame id");
   }
 
@@ -161,7 +162,7 @@ void ArcReplacer::RecordAccess(frame_id_t frame_id, page_id_t page_id, [[maybe_u
  */
 void ArcReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {
   std::lock_guard<std::mutex> lock(latch_);
-  if (frame_id < 0 || static_cast<size_t>(frame_id) >= replacer_size_) {
+  if (frame_id < 0) {
     throw Exception("ArcReplacer: invalid frame id");
   }
   auto it = alive_map_.find(frame_id);
@@ -184,7 +185,7 @@ void ArcReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {
  */
 void ArcReplacer::Remove(frame_id_t frame_id) {
   std::lock_guard<std::mutex> lock(latch_);
-  if (frame_id < 0 || static_cast<size_t>(frame_id) >= replacer_size_) {
+  if (frame_id < 0) {
     throw Exception("ArcReplacer: invalid frame id");
   }
   auto it = alive_map_.find(frame_id);
