@@ -20,6 +20,27 @@
 
 namespace bustub {
 
+namespace {
+
+/** B+Tree index over a single integer / two integer / generic fixed-size key column(s). */
+using IntegerKeyType4 = GenericKey<4>;
+using BPlusTreeIndexForOneIntegerColumn = BPlusTreeIndex<IntegerKeyType4, RID, GenericComparator<4>>;
+
+/** Walk the whole B+Tree and collect all RIDs in key order. */
+template <typename BTreeIndexType>
+auto CollectAllRids(Index *index, std::vector<RID> *rids) -> bool {
+  auto *btree_index = dynamic_cast<BTreeIndexType *>(index);
+  if (btree_index == nullptr) {
+    return false;
+  }
+  for (auto iter = btree_index->GetBeginIterator(); !iter.IsEnd(); ++iter) {
+    rids->emplace_back((*iter).second);
+  }
+  return true;
+}
+
+}  // namespace
+
 /**
  * Creates a new index scan executor.
  * @param exec_ctx the executor context
@@ -55,11 +76,12 @@ void IndexScanExecutor::Init() {
   }
 
   // Full index scan: walk the whole B+Tree and collect all RIDs in key order.
-  auto *btree_index = dynamic_cast<BPlusTreeIndexForTwoIntegerColumn *>(index);
-  if (btree_index != nullptr) {
-    for (auto iter = btree_index->GetBeginIterator(); !iter.IsEnd(); ++iter) {
-      rids_.emplace_back((*iter).second);
-    }
+  if (CollectAllRids<BPlusTreeIndexForOneIntegerColumn>(index, &rids_) ||
+      CollectAllRids<BPlusTreeIndexForTwoIntegerColumn>(index, &rids_) ||
+      CollectAllRids<BPlusTreeIndex<GenericKey<16>, RID, GenericComparator<16>>>(index, &rids_) ||
+      CollectAllRids<BPlusTreeIndex<GenericKey<32>, RID, GenericComparator<32>>>(index, &rids_) ||
+      CollectAllRids<BPlusTreeIndex<GenericKey<64>, RID, GenericComparator<64>>>(index, &rids_)) {
+    return;
   }
 }
 
