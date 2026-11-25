@@ -56,7 +56,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure -R "BufferPoolManagerTest"
 
       - name: "P2: B+Tree insert and scan"
-        run: ctest --test-dir build --output-on-failure -R "BasicInsertTest|InsertTest1NoIterator|InsertTest2"
+        run: ctest --test-dir build --output-on-failure -R "BPlusTreeTests\.(BasicInsertTest|InsertTest1NoIterator|InsertTest2)\b"
 
       - name: "P2: B+Tree delete"
         run: ctest --test-dir build --output-on-failure -R "DeleteTestNoIterator|SequentialEdgeMixTest"
@@ -71,7 +71,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure -R "BucketPageSampleTest|HeaderDirectoryPageSampleTest"
 
       - name: "P2: extendible hash table"
-        run: ctest --test-dir build --output-on-failure -R "ExtendibleHTableTest.*InsertTest|ExtendibleHTableTest.*RemoveTest"
+        run: ctest --test-dir build --output-on-failure -R "ExtendibleHTableTest\.(InsertTest1|InsertTest2|RemoveTest1)"
 
       - name: "P2: extendible hash table concurrent"
         run: ctest --test-dir build --output-on-failure -R "ExtendibleHTableConcurrentTest"

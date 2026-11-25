@@ -142,44 +142,47 @@ auto DiskExtendibleHashTable<K, V, KC>::Insert(const K &key, const V &value, Tra
 
   WritePageGuard directory_guard = bpm_->WritePage(directory_page_id);
   auto *directory = directory_guard.AsMut<ExtendibleHTableDirectoryPage>();
-  const uint32_t bucket_idx = directory->HashToBucketIndex(hash);
-  page_id_t bucket_page_id = directory->GetBucketPageId(bucket_idx);
-  if (bucket_page_id == INVALID_PAGE_ID) {
-    return InsertToNewBucket(directory, bucket_idx, key, value);
+
+  // Keep splitting until the key fits into a bucket: a single split may leave the target bucket full
+  // when every entry in it still hashes to the same half.
+  while (true) {
+    const uint32_t bucket_idx = directory->HashToBucketIndex(hash);
+    const page_id_t bucket_page_id = directory->GetBucketPageId(bucket_idx);
+    if (bucket_page_id == INVALID_PAGE_ID) {
+      return InsertToNewBucket(directory, bucket_idx, key, value);
+    }
+
+    WritePageGuard bucket_guard = bpm_->WritePage(bucket_page_id);
+    auto *bucket = bucket_guard.AsMut<BucketPage<K, V, KC>>();
+    if (bucket->Insert(key, value, cmp_)) {
+      return true;
+    }
+    if (!bucket->IsFull()) {
+      return false;  // the key is already present
+    }
+
+    // The bucket is full, so it has to split.
+    const uint32_t local_depth = directory->GetLocalDepth(bucket_idx);
+    if (local_depth == directory->GetMaxDepth()) {
+      return false;  // the table cannot grow any further
+    }
+    if (local_depth == directory->GetGlobalDepth()) {
+      directory->IncrGlobalDepth();
+    }
+
+    const uint32_t split_bucket_idx = bucket_idx ^ (1u << local_depth);
+    const page_id_t new_bucket_page_id = bpm_->NewPage();
+    WritePageGuard new_bucket_guard = bpm_->WritePage(new_bucket_page_id);
+    auto *new_bucket = new_bucket_guard.AsMut<BucketPage<K, V, KC>>();
+    new_bucket->Init(bucket_max_size_);
+
+    const uint32_t new_local_depth = local_depth + 1;
+    MigrateEntries(bucket, new_bucket, split_bucket_idx, (1u << new_local_depth) - 1);
+    UpdateDirectoryMapping(directory, split_bucket_idx, new_bucket_page_id, new_local_depth,
+                           (1u << local_depth) - 1);
   }
 
-  WritePageGuard bucket_guard = bpm_->WritePage(bucket_page_id);
-  auto *bucket = bucket_guard.AsMut<BucketPage<K, V, KC>>();
-  if (bucket->Insert(key, value, cmp_)) {
-    return true;
-  }
-  if (!bucket->IsFull()) {
-    return false;  // the key is already present
-  }
-
-  // The bucket is full, so it has to split.
-  const uint32_t local_depth = directory->GetLocalDepth(bucket_idx);
-  if (local_depth == directory->GetMaxDepth()) {
-    return false;  // the table cannot grow any further
-  }
-  if (local_depth == directory->GetGlobalDepth()) {
-    directory->IncrGlobalDepth();
-  }
-
-  const uint32_t split_bucket_idx = bucket_idx ^ (1u << local_depth);
-  const page_id_t new_bucket_page_id = bpm_->NewPage();
-  WritePageGuard new_bucket_guard = bpm_->WritePage(new_bucket_page_id);
-  auto *new_bucket = new_bucket_guard.AsMut<BucketPage<K, V, KC>>();
-  new_bucket->Init(bucket_max_size_);
-
-  const uint32_t new_local_depth = local_depth + 1;
-  MigrateEntries(bucket, new_bucket, split_bucket_idx, (1u << new_local_depth) - 1);
-  UpdateDirectoryMapping(directory, split_bucket_idx, new_bucket_page_id, new_local_depth, (1u << local_depth) - 1);
-
-  if (directory->HashToBucketIndex(hash) == split_bucket_idx) {
-    return new_bucket->Insert(key, value, cmp_);
-  }
-  return bucket->Insert(key, value, cmp_);
+  return false;
 }
 
 template <typename K, typename V, typename KC>
