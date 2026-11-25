@@ -424,7 +424,6 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
     bpm_->DeletePage(victim);
   }
 }
-}
 
 /*****************************************************************************
  * INDEX ITERATOR
