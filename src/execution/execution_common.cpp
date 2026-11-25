@@ -327,7 +327,8 @@ void ModifyTuple(TransactionManager *txn_mgr, Transaction *txn, TableHeap *table
                  std::optional<UndoLink> undo_link, const Tuple *target_tuple) {
   const auto temp_ts = txn->GetTransactionTempTs();
   const bool deleted = target_tuple == nullptr;
-  auto new_tuple = deleted ? GenerateNullTupleForSchema(schema) : *target_tuple;
+  // A tombstone must keep the original tuple bytes: TablePage requires the size to stay the same.
+  auto new_tuple = deleted ? base_tuple : *target_tuple;
 
   if (base_meta.ts_ == temp_ts && (!undo_link.has_value() || !undo_link->IsValid())) {
     // the tuple was inserted by this txn: no undo log is needed
