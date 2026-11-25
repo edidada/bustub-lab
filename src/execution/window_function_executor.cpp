@@ -13,6 +13,7 @@
 #include "execution/executors/window_function_executor.h"
 
 #include <algorithm>
+#include <map>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -134,10 +135,9 @@ void WindowFunctionExecutor::Init() {
     for (auto &[key, rows] : partitions) {
       // Keep the rows in partition order.
       std::vector<size_t> ordered = rows;
-      std::vector<SortKey> sort_keys;
-      sort_keys.reserve(ordered.size());
+      std::map<size_t, SortKey> sort_keys;
       for (const auto row : ordered) {
-        sort_keys.emplace_back(GenerateSortKey(input[row], function.order_by_, child_schema));
+        sort_keys[row] = GenerateSortKey(input[row], function.order_by_, child_schema);
       }
 
       auto key_less = [&](size_t a, size_t b) {
@@ -196,10 +196,49 @@ void WindowFunctionExecutor::Init() {
     }
   }
 
-  // Build the output tuples, preserving the input row order.
+  // Rows are emitted ordered by the partition-by keys and then the order-by keys of the first window function
+  // that has either of them. Without any ordering, the input order is preserved.
+  std::vector<size_t> output_order(input.size());
+  for (size_t row = 0; row < input.size(); row++) {
+    output_order[row] = row;
+  }
+  for (const auto &[column_idx, function] : plan_->window_functions_) {
+    if (function.partition_by_.empty() && function.order_by_.empty()) {
+      continue;
+    }
+    TupleComparator comparator(function.order_by_);
+    std::vector<std::vector<Value>> partition_keys(input.size());
+    std::vector<SortKey> sort_keys(input.size());
+    for (size_t row = 0; row < input.size(); row++) {
+      for (const auto &expr : function.partition_by_) {
+        partition_keys[row].emplace_back(expr->Evaluate(&input[row], child_schema));
+      }
+      sort_keys[row] = GenerateSortKey(input[row], function.order_by_, child_schema);
+    }
+    std::stable_sort(output_order.begin(), output_order.end(), [&](size_t a, size_t b) {
+      const auto &keys_a = partition_keys[a];
+      const auto &keys_b = partition_keys[b];
+      for (size_t i = 0; i < keys_a.size(); i++) {
+        if (keys_a[i].IsNull() || keys_b[i].IsNull()) {
+          if (keys_a[i].IsNull() != keys_b[i].IsNull()) {
+            return keys_a[i].IsNull();
+          }
+          continue;
+        }
+        if (keys_a[i].CompareEquals(keys_b[i]) == CmpBool::CmpTrue) {
+          continue;
+        }
+        return keys_a[i].CompareLessThan(keys_b[i]) == CmpBool::CmpTrue;
+      }
+      return comparator(SortEntry{sort_keys[a], input[a]}, SortEntry{sort_keys[b], input[b]});
+    });
+    break;
+  }
+
+  // Build the output tuples in the computed output order.
   results_.clear();
   results_.reserve(input.size());
-  for (size_t row = 0; row < input.size(); row++) {
+  for (const size_t row : output_order) {
     std::vector<Value> values;
     values.reserve(plan_->columns_.size());
     for (size_t i = 0; i < plan_->columns_.size(); i++) {

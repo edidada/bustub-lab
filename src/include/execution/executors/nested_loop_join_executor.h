@@ -13,6 +13,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "execution/executor_context.h"
@@ -49,8 +50,26 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
   /** The right child executor */
   std::unique_ptr<AbstractExecutor> right_executor_;
 
-  /** The materialized output tuples of the join */
-  std::vector<Tuple> results_;
+  /** Buffer of left tuples for the current left batch */
+  std::vector<Tuple> left_buffer_;
+
+  /** Position of the next unconsumed left tuple in `left_buffer_` */
+  size_t left_pos_{0};
+
+  /** The left tuple currently being matched against the right side */
+  std::optional<Tuple> current_left_;
+
+  /** The current right tuples for `current_left_` */
+  std::vector<Tuple> right_buffer_;
+
+  /** Position of the next unconsumed right tuple in `right_buffer_` */
+  size_t right_pos_{0};
+
+  /** Whether `right_buffer_` is exhausted for the current left tuple */
+  bool right_done_{true};
+
+  /** Whether the current left tuple has produced at least one joined row */
+  bool current_left_matched_{false};
 
   /** The position of the next result tuple to be emitted */
   size_t result_pos_{0};

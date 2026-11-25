@@ -112,10 +112,11 @@ class SimpleAggregationHashTable {
    * @param agg_val the value to be inserted
    */
   void InsertCombine(const AggregateKey &agg_key, const AggregateValue &agg_val) {
-    if (ht_.count(agg_key) == 0) {
-      ht_.insert({agg_key, GenerateInitialAggregateValue()});
+    auto iter = ht_.find(agg_key);
+    if (iter == ht_.end()) {
+      iter = ht_.emplace(agg_key, GenerateInitialAggregateValue()).first;
     }
-    CombineAggregateValues(&ht_[agg_key], agg_val);
+    CombineAggregateValues(&iter->second, agg_val);
   }
 
   /**

@@ -45,64 +45,15 @@ NestedLoopJoinExecutor::NestedLoopJoinExecutor(ExecutorContext *exec_ctx, const 
 
 /** Initialize the join */
 void NestedLoopJoinExecutor::Init() {
-  results_.clear();
-  result_pos_ = 0;
+  left_buffer_.clear();
+  left_pos_ = 0;
+  current_left_.reset();
+  right_buffer_.clear();
+  right_pos_ = 0;
+  right_done_ = true;
+  current_left_matched_ = false;
 
   left_executor_->Init();
-  right_executor_->Init();
-
-  std::vector<Tuple> tuples;
-  std::vector<RID> rids;
-
-  std::vector<Tuple> left_tuples;
-  while (left_executor_->Next(&tuples, &rids, BUSTUB_BATCH_SIZE)) {
-    for (const auto &tuple : tuples) {
-      left_tuples.emplace_back(tuple);
-    }
-  }
-
-  std::vector<Tuple> right_tuples;
-  while (right_executor_->Next(&tuples, &rids, BUSTUB_BATCH_SIZE)) {
-    for (const auto &tuple : tuples) {
-      right_tuples.emplace_back(tuple);
-    }
-  }
-
-  const auto &left_schema = left_executor_->GetOutputSchema();
-  const auto &right_schema = right_executor_->GetOutputSchema();
-  const auto &predicate = plan_->Predicate();
-
-  for (const auto &left_tuple : left_tuples) {
-    bool matched = false;
-    for (const auto &right_tuple : right_tuples) {
-      bool ok = true;
-      if (predicate != nullptr) {
-        auto value = predicate->EvaluateJoin(&left_tuple, left_schema, &right_tuple, right_schema);
-        ok = !value.IsNull() && value.GetAs<int8_t>() == 1;
-      }
-      if (ok) {
-        matched = true;
-        std::vector<Value> values;
-        for (uint32_t i = 0; i < left_schema.GetColumnCount(); i++) {
-          values.emplace_back(left_tuple.GetValue(&left_schema, i));
-        }
-        for (uint32_t i = 0; i < right_schema.GetColumnCount(); i++) {
-          values.emplace_back(right_tuple.GetValue(&right_schema, i));
-        }
-        results_.emplace_back(Tuple(std::move(values), &GetOutputSchema()));
-      }
-    }
-    if (!matched && plan_->GetJoinType() == JoinType::LEFT) {
-      std::vector<Value> values;
-      for (uint32_t i = 0; i < left_schema.GetColumnCount(); i++) {
-        values.emplace_back(left_tuple.GetValue(&left_schema, i));
-      }
-      for (const auto &column : right_schema.GetColumns()) {
-        values.emplace_back(ValueFactory::GetNullValueByType(column.GetType()));
-      }
-      results_.emplace_back(Tuple(std::move(values), &GetOutputSchema()));
-    }
-  }
 }
 
 /**
@@ -113,9 +64,86 @@ auto NestedLoopJoinExecutor::Next(std::vector<bustub::Tuple> *tuple_batch, std::
   tuple_batch->clear();
   rid_batch->clear();
 
-  while (result_pos_ < results_.size() && tuple_batch->size() < batch_size) {
-    tuple_batch->emplace_back(results_[result_pos_++]);
+  const auto &left_schema = left_executor_->GetOutputSchema();
+  const auto &right_schema = right_executor_->GetOutputSchema();
+  const auto &predicate = plan_->Predicate();
+  const bool is_left_join = plan_->GetJoinType() == JoinType::LEFT;
+
+  auto emit_joined = [&](const Tuple &left_tuple, const Tuple *right_tuple) {
+    std::vector<Value> values;
+    for (uint32_t i = 0; i < left_schema.GetColumnCount(); i++) {
+      values.emplace_back(left_tuple.GetValue(&left_schema, i));
+    }
+    if (right_tuple != nullptr) {
+      for (uint32_t i = 0; i < right_schema.GetColumnCount(); i++) {
+        values.emplace_back(right_tuple->GetValue(&right_schema, i));
+      }
+    } else {
+      for (const auto &column : right_schema.GetColumns()) {
+        values.emplace_back(ValueFactory::GetNullValueByType(column.GetType()));
+      }
+    }
+    tuple_batch->emplace_back(Tuple(std::move(values), &GetOutputSchema()));
     rid_batch->emplace_back(RID{});
+  };
+
+  while (tuple_batch->size() < batch_size) {
+    // Fetch the next left tuple, re-initializing the right child for every left tuple.
+    if (!current_left_.has_value()) {
+      if (left_pos_ >= left_buffer_.size()) {
+        std::vector<Tuple> tuples;
+        std::vector<RID> rids;
+        if (!left_executor_->Next(&tuples, &rids, BUSTUB_BATCH_SIZE)) {
+          return !tuple_batch->empty();
+        }
+        left_buffer_ = std::move(tuples);
+        left_pos_ = 0;
+        if (left_buffer_.empty()) {
+          continue;
+        }
+      }
+      current_left_ = left_buffer_[left_pos_++];
+      right_executor_->Init();
+      right_buffer_.clear();
+      right_pos_ = 0;
+      right_done_ = false;
+      current_left_matched_ = false;
+    }
+
+    // Pull the next right tuple for the current left tuple.
+    if (!right_done_ && right_pos_ >= right_buffer_.size()) {
+      std::vector<Tuple> tuples;
+      std::vector<RID> rids;
+      if (right_executor_->Next(&tuples, &rids, BUSTUB_BATCH_SIZE)) {
+        right_buffer_ = std::move(tuples);
+        right_pos_ = 0;
+      } else {
+        right_done_ = true;
+      }
+    }
+
+    if (!right_done_) {
+      const auto &right_tuple = right_buffer_[right_pos_++];
+      bool ok = true;
+      if (predicate != nullptr) {
+        auto value = predicate->EvaluateJoin(&*current_left_, left_schema, &right_tuple, right_schema);
+        ok = !value.IsNull() && value.GetAs<int8_t>() == 1;
+      }
+      if (ok) {
+        current_left_matched_ = true;
+        emit_joined(*current_left_, &right_tuple);
+      }
+      continue;
+    }
+
+    // Right side exhausted for this left tuple: emit a null-padded row for a left join without matches.
+    if (!current_left_matched_ && is_left_join) {
+      current_left_matched_ = true;
+      emit_joined(*current_left_, nullptr);
+      continue;
+    }
+
+    current_left_.reset();
   }
 
   return !tuple_batch->empty();
