@@ -1,0 +1,52 @@
+name: edidada CI (BusTub)
+
+on:
+  push:
+    branches:
+      - edidada/master
+  workflow_dispatch:
+
+env:
+  BUILD_TYPE: Debug
+
+jobs:
+  build-and-test:
+    name: "Build and run lab tests"
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang-18 clang++-18
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_C_COMPILER=clang-18 \
+            -DCMAKE_CXX_COMPILER=clang++-18
+
+      - name: "Build (bustub library and P1 tests)"
+        run: |
+          cmake --build build -j"$(nproc)" --target bustub
+          cmake --build build -j"$(nproc)" \
+            lru_k_replacer_test arc_replacer_test buffer_pool_manager_test \
+            page_guard_test disk_scheduler_test
+
+      - name: "P1: LRU-K replacer"
+        run: ctest --test-dir build --output-on-failure -R "LRUKReplacerTest"
+
+      - name: "P1: ARC replacer"
+        run: ctest --test-dir build --output-on-failure -R "ArcReplacerTest"
+
+      - name: "P1: disk scheduler"
+        run: ctest --test-dir build --output-on-failure -R "DiskSchedulerTest"
+
+      - name: "P1: page guards"
+        run: ctest --test-dir build --output-on-failure -R "PageGuardTest"
+
+      - name: "P1: buffer pool manager"
+        run: ctest --test-dir build --output-on-failure -R "BufferPoolManagerTest"

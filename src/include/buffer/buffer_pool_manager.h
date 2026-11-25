@@ -14,6 +14,7 @@
 
 #include <list>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <unordered_map>
 #include <vector>
@@ -87,6 +88,9 @@ class FrameHeader {
    * If the frame does not hold any page data, the frame contains all null bytes.
    */
   std::vector<char> data_;
+
+  /** @brief The page ID currently stored in this frame, if any. */
+  std::optional<page_id_t> page_id_;
 
   /**
    * TODO(P1): You may add any fields or helper functions under here that you think are necessary.
@@ -171,5 +175,8 @@ class BufferPoolManager {
    * stored inside of it. Additionally, you may also want to implement a helper function that returns either a shared
    * pointer to a `FrameHeader` that already has a page's data stored inside of it, or an index to said `FrameHeader`.
    */
+
+  /** @brief Pins the frame holding `page_id` (loading it from disk if needed) and returns its header. */
+  auto PinPage(page_id_t page_id, AccessType access_type) -> std::optional<std::shared_ptr<FrameHeader>>;
 };
 }  // namespace bustub

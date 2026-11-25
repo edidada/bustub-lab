@@ -39,7 +39,38 @@ LRUKReplacer::LRUKReplacer(size_t num_frames, size_t k) : replacer_size_(num_fra
  *
  * @return the frame ID if a frame is successfully evicted, or `std::nullopt` if no frames can be evicted.
  */
-auto LRUKReplacer::Evict() -> std::optional<frame_id_t> { return std::nullopt; }
+auto LRUKReplacer::Evict() -> std::optional<frame_id_t> {
+  std::lock_guard<std::mutex> lock(latch_);
+  std::optional<frame_id_t> victim = std::nullopt;
+  size_t best_score = 0;
+  bool has_inf = false;
+  size_t best_oldest = 0;
+  for (auto &[fid, node] : node_store_) {
+    if (!node.is_evictable_) {
+      continue;
+    }
+    if (node.history_.size() < k_) {
+      // Infinite backward k-distance: pick the most ancient oldest timestamp.
+      if (!has_inf || node.history_.front() < best_oldest) {
+        has_inf = true;
+        best_oldest = node.history_.front();
+        victim = fid;
+      }
+    } else if (!has_inf) {
+      size_t kth = node.history_.front();
+      if (!victim.has_value() || kth < best_score) {
+        best_score = kth;
+        victim = fid;
+      }
+    }
+  }
+  if (!victim.has_value()) {
+    return std::nullopt;
+  }
+  node_store_.erase(victim.value());
+  curr_size_--;
+  return victim;
+}
 
 /**
  * TODO(P1): Add implementation
@@ -54,7 +85,19 @@ auto LRUKReplacer::Evict() -> std::optional<frame_id_t> { return std::nullopt; }
  * @param access_type type of access that was received. This parameter is only needed for
  * leaderboard tests.
  */
-void LRUKReplacer::RecordAccess(frame_id_t frame_id, [[maybe_unused]] AccessType access_type) {}
+void LRUKReplacer::RecordAccess(frame_id_t frame_id, [[maybe_unused]] AccessType access_type) {
+  std::lock_guard<std::mutex> lock(latch_);
+  if (frame_id < 0 || static_cast<size_t>(frame_id) >= replacer_size_) {
+    throw Exception("LRUKReplacer: invalid frame id");
+  }
+  auto &node = node_store_[frame_id];
+  node.fid_ = frame_id;
+  node.k_ = k_;
+  node.history_.push_back(current_timestamp_++);
+  if (node.history_.size() > k_) {
+    node.history_.pop_front();
+  }
+}
 
 /**
  * TODO(P1): Add implementation
@@ -73,7 +116,26 @@ void LRUKReplacer::RecordAccess(frame_id_t frame_id, [[maybe_unused]] AccessType
  * @param frame_id id of frame whose 'evictable' status will be modified
  * @param set_evictable whether the given frame is evictable or not
  */
-void LRUKReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {}
+void LRUKReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {
+  std::lock_guard<std::mutex> lock(latch_);
+  if (frame_id < 0 || static_cast<size_t>(frame_id) >= replacer_size_) {
+    throw Exception("LRUKReplacer: invalid frame id");
+  }
+  auto it = node_store_.find(frame_id);
+  if (it == node_store_.end()) {
+    return;
+  }
+  auto &node = it->second;
+  if (node.is_evictable_ == set_evictable) {
+    return;
+  }
+  node.is_evictable_ = set_evictable;
+  if (set_evictable) {
+    curr_size_++;
+  } else {
+    curr_size_--;
+  }
+}
 
 /**
  * TODO(P1): Add implementation
@@ -92,7 +154,21 @@ void LRUKReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {}
  *
  * @param frame_id id of frame to be removed
  */
-void LRUKReplacer::Remove(frame_id_t frame_id) {}
+void LRUKReplacer::Remove(frame_id_t frame_id) {
+  std::lock_guard<std::mutex> lock(latch_);
+  if (frame_id < 0 || static_cast<size_t>(frame_id) >= replacer_size_) {
+    throw Exception("LRUKReplacer: invalid frame id");
+  }
+  auto it = node_store_.find(frame_id);
+  if (it == node_store_.end()) {
+    return;
+  }
+  if (!it->second.is_evictable_) {
+    throw Exception("LRUKReplacer: removing a non-evictable frame");
+  }
+  node_store_.erase(it);
+  curr_size_--;
+}
 
 /**
  * TODO(P1): Add implementation
@@ -101,6 +177,9 @@ void LRUKReplacer::Remove(frame_id_t frame_id) {}
  *
  * @return size_t
  */
-auto LRUKReplacer::Size() -> size_t { return 0; }
+auto LRUKReplacer::Size() -> size_t {
+  std::lock_guard<std::mutex> lock(latch_);
+  return curr_size_;
+}
 
 }  // namespace bustub
