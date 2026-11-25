@@ -40,15 +40,30 @@ void AggregationExecutor::Init() {
 
   std::vector<Tuple> tuples;
   std::vector<RID> rids;
+  size_t input_rows = 0;
   while (child_executor_->Next(&tuples, &rids, BUSTUB_BATCH_SIZE)) {
     for (const auto &tuple : tuples) {
       aht_.InsertCombine(MakeAggregateKey(&tuple), MakeAggregateValue(&tuple));
+      input_rows++;
     }
   }
 
-  // For an aggregation without group by over an empty input, a single default row is produced.
-  if (aht_.Begin() == aht_.End() && plan_->GetGroupBys().empty()) {
-    aht_.InsertCombine(AggregateKey{}, AggregateValue{});
+  default_row_.reset();
+
+  // For an aggregation without group by over an empty input, a single default row is produced:
+  // COUNT yields 0, while SUM/MIN/MAX yield NULL.
+  if (input_rows == 0 && plan_->GetGroupBys().empty()) {
+    std::vector<Value> values;
+    const auto &agg_types = plan_->GetAggregateTypes();
+    const auto &output_schema = GetOutputSchema();
+    for (uint32_t i = 0; i < agg_types.size(); i++) {
+      if (agg_types[i] == AggregationType::CountStarAggregate) {
+        values.emplace_back(ValueFactory::GetIntegerValue(0));
+      } else {
+        values.emplace_back(ValueFactory::GetNullValueByType(output_schema.GetColumn(i).GetType()));
+      }
+    }
+    default_row_ = std::move(values);
   }
 
   aht_iterator_ = std::make_unique<SimpleAggregationHashTable::Iterator>(aht_.Begin());
@@ -61,6 +76,13 @@ auto AggregationExecutor::Next(std::vector<bustub::Tuple> *tuple_batch, std::vec
                                size_t batch_size) -> bool {
   tuple_batch->clear();
   rid_batch->clear();
+
+  if (default_row_.has_value() && tuple_batch->empty()) {
+    tuple_batch->emplace_back(Tuple(*default_row_, &GetOutputSchema()));
+    rid_batch->emplace_back(RID{});
+    default_row_.reset();
+    return true;
+  }
 
   while (tuple_batch->size() < batch_size && *aht_iterator_ != aht_.End()) {
     std::vector<Value> values;

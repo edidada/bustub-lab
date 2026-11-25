@@ -13,6 +13,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -216,5 +217,8 @@ class AggregationExecutor : public AbstractExecutor {
 
   /** Simple aggregation hash table iterator */
   std::unique_ptr<SimpleAggregationHashTable::Iterator> aht_iterator_;
+
+  /** The single default output row produced by an aggregation without group by over empty input */
+  std::optional<std::vector<Value>> default_row_;
 };
 }  // namespace bustub
