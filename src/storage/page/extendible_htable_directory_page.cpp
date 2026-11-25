@@ -154,7 +154,7 @@ auto ExtendibleHTableDirectoryPage::GetLocalDepth(uint32_t bucket_idx) const -> 
  */
 void ExtendibleHTableDirectoryPage::SetLocalDepth(uint32_t bucket_idx, uint8_t local_depth) {
   BUSTUB_ASSERT(bucket_idx < Size(), "bucket index out of range");
-  BUSTUB_ASSERT(local_depth <= global_depth_, "local depth cannot exceed global depth");
+  BUSTUB_ASSERT(local_depth <= max_depth_, "local depth cannot exceed max depth");
   local_depths_[bucket_idx] = local_depth;
 }
 
