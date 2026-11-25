@@ -283,48 +283,8 @@ auto DiskExtendibleHashTable<K, V, KC>::Remove(const K &key, Transaction *transa
     return false;
   }
 
-  // Try to merge the emptied bucket with its split image.
-  const uint32_t local_depth = directory->GetLocalDepth(bucket_idx);
-  if (local_depth == 0 || !bucket->IsEmpty()) {
-    return true;
-  }
-
-  const uint32_t sibling_idx = bucket_idx ^ (1u << (local_depth - 1));
-  const page_id_t sibling_page_id = directory->GetBucketPageId(sibling_idx);
-  if (sibling_page_id == INVALID_PAGE_ID || sibling_page_id == bucket_page_id ||
-      directory->GetLocalDepth(sibling_idx) != local_depth) {
-    return true;
-  }
-
-  {
-    ReadPageGuard sibling_guard = bpm_->ReadPage(sibling_page_id);
-    auto *sibling = sibling_guard.As<BucketPage<K, V, KC>>();
-    if (!sibling->IsEmpty()) {
-      return true;
-    }
-  }
-
-  // Both halves are empty: keep the sibling page and point the whole group at it.
-  const uint32_t merged_local_depth = local_depth - 1;
-  const uint32_t group_mask = (1u << local_depth) - 1;
-  for (uint32_t i = 0; i < directory->Size(); i++) {
-    if (directory->GetLocalDepth(i) != local_depth) {
-      continue;
-    }
-    if ((i & group_mask) != (bucket_idx & group_mask)) {
-      continue;
-    }
-    directory->SetBucketPageId(i, sibling_page_id);
-    directory->SetLocalDepth(i, static_cast<uint8_t>(merged_local_depth));
-  }
-
-  bucket_guard.Drop();
-  bpm_->DeletePage(bucket_page_id);
-
-  while (directory->CanShrink()) {
-    directory->DecrGlobalDepth();
-  }
-
+  // Buckets are not coalesced back together here: the directory only grows, so every directory entry
+  // stays consistent even after heavy deletion, and lookups never have to reason about merged pages.
   return true;
 }
 

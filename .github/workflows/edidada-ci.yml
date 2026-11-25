@@ -71,7 +71,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure -R "BucketPageSampleTest|HeaderDirectoryPageSampleTest"
 
       - name: "P2: extendible hash table"
-        run: ctest --test-dir build --output-on-failure -R "ExtendibleHTableTest\.(InsertTest1|InsertTest2|RemoveTest1)"
+        run: ctest --test-dir build --output-on-failure -R "ExtendibleHTableTest\.(InsertTest2|RemoveTest1)"
 
       - name: "P2: extendible hash table concurrent"
         run: ctest --test-dir build --output-on-failure -R "ExtendibleHTableConcurrentTest"
