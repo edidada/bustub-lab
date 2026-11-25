@@ -34,7 +34,6 @@ void ExternalMergeSortExecutor<K>::Init() {
   result_iter_.reset();
 
   const auto &child_schema = child_executor_->GetOutputSchema();
-  auto *bpm = exec_ctx_->GetBufferPoolManager();
 
   // Phase 1: read the input in chunks, sort each chunk in memory, and write it out as a run.
   constexpr size_t MEMORY_ENTRIES = 1024;
