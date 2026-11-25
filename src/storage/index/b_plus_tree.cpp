@@ -262,6 +262,9 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
   }
   leaf->RemoveAt(pos);
 
+  // Pages that must be freed once all latches held by this operation are released.
+  std::vector<page_id_t> pending_deletes;
+
   // Fix any underflow, from the leaf upwards.
   for (int level = static_cast<int>(ctx.write_set_.size()) - 1; level >= 1; level--) {
     auto *page = ctx.write_set_[level].template As<BPlusTreePage>();
@@ -311,7 +314,7 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
           leaf->SetNextPageId(right->GetNextPageId());
         }
         parent->RemoveAt(index + 1);
-        bpm_->DeletePage(victim);
+        pending_deletes.push_back(victim);
         fixed = true;
       }
       if (!fixed && left_pid != INVALID_PAGE_ID) {
@@ -327,8 +330,7 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
           left->SetNextPageId(next_of_victim);
         }
         parent->RemoveAt(index);
-        ctx.write_set_[level].Drop();
-        bpm_->DeletePage(victim);
+        pending_deletes.push_back(victim);
         fixed = true;
       }
     } else {
@@ -368,7 +370,7 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
           }
         }
         parent->RemoveAt(index + 1);
-        bpm_->DeletePage(victim);
+        pending_deletes.push_back(victim);
         fixed = true;
       }
       if (!fixed && left_pid != INVALID_PAGE_ID) {
@@ -394,17 +396,34 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
   }
 
   // Shrink the tree if the root internal page has only one child left.
-  while (!ctx.write_set_.empty()) {
-    auto *page = ctx.write_set_.front().template As<BPlusTreePage>();
+  size_t root_pos = 0;
+  while (root_pos < ctx.write_set_.size()) {
+    auto *page = ctx.write_set_[root_pos].template As<BPlusTreePage>();
     if (page->IsLeafPage() || page->GetSize() > 1) {
       break;
     }
-    const page_id_t old_root = ctx.write_set_.front().GetPageId();
-    const page_id_t child = ctx.write_set_.front().template As<InternalPage>()->ValueAt(0);
-    ctx.write_set_.pop_front();
+    const page_id_t old_root = ctx.write_set_[root_pos].GetPageId();
+    const page_id_t child = ctx.write_set_[root_pos].template As<InternalPage>()->ValueAt(0);
     header->root_page_id_ = child;
-    bpm_->DeletePage(old_root);
+    pending_deletes.push_back(old_root);
+    root_pos++;
   }
+
+  // An emptied root leaf means the tree has no keys at all.
+  if (root_pos < ctx.write_set_.size()) {
+    auto *page = ctx.write_set_[root_pos].template As<BPlusTreePage>();
+    if (page->IsLeafPage() && page->GetSize() == 0) {
+      pending_deletes.push_back(ctx.write_set_[root_pos].GetPageId());
+      header->root_page_id_ = INVALID_PAGE_ID;
+    }
+  }
+
+  // Release every latch before freeing pages.
+  ctx.write_set_.clear();
+  for (const page_id_t victim : pending_deletes) {
+    bpm_->DeletePage(victim);
+  }
+}
 }
 
 /*****************************************************************************
