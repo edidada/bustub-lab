@@ -107,6 +107,7 @@ auto ExternalMergeSortExecutor<K>::WriteRun(const std::vector<SortEntry> &entrie
         next_guard.AsMut<IntermediateResultPage>()->Init();
         page->SetNextPageId(next_page_id);
         page_id = next_page_id;
+        pages.emplace_back(next_page_id);
       }
     }
   }
@@ -140,6 +141,7 @@ auto ExternalMergeSortExecutor<K>::MergeTwoRuns(MergeSortRun &left, MergeSortRun
         next_guard.AsMut<IntermediateResultPage>()->Init();
         page->SetNextPageId(next_page_id);
         page_id = next_page_id;
+        pages.emplace_back(next_page_id);
       }
     }
 
