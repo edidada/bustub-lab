@@ -116,11 +116,11 @@ void ArcReplacer::RecordAccess(frame_id_t frame_id, page_id_t page_id, [[maybe_u
     ghost_map_.erase(ghost_it);
     if (status->arc_status_ == ArcStatus::MRU_GHOST) {
       mru_ghost_.remove(page_id);
-      size_t delta = mru_ghost_.empty() ? 1 : std::max<size_t>(mfu_ghost_.size() / (mru_ghost_.size() + 1), 1);
+      size_t delta = std::max<size_t>(mfu_ghost_.size() / (mru_ghost_.size() + 1), 1);
       mru_target_size_ = std::min(mru_target_size_ + delta, replacer_size_);
     } else {
       mfu_ghost_.remove(page_id);
-      size_t delta = mfu_ghost_.empty() ? 0 : mru_ghost_.size() / (mfu_ghost_.size() + 1);
+      size_t delta = mru_ghost_.size() / (mfu_ghost_.size() + 1);
       mru_target_size_ = mru_target_size_ > delta ? mru_target_size_ - delta : 0;
     }
     status->frame_id_ = frame_id;
