@@ -10,10 +10,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <memory>
-#include "common/macros.h"
-
 #include "execution/executors/aggregation_executor.h"
+
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "common/macros.h"
 
 namespace bustub {
 
@@ -25,24 +28,55 @@ namespace bustub {
  */
 AggregationExecutor::AggregationExecutor(ExecutorContext *exec_ctx, const AggregationPlanNode *plan,
                                          std::unique_ptr<AbstractExecutor> &&child_executor)
-    : AbstractExecutor(exec_ctx) {
-  UNIMPLEMENTED("TODO(P3): Add implementation.");
-}
+    : AbstractExecutor(exec_ctx),
+      plan_(plan),
+      child_executor_(std::move(child_executor)),
+      aht_(plan->GetAggregates(), plan->GetAggregateTypes()) {}
 
 /** Initialize the aggregation */
-void AggregationExecutor::Init() { UNIMPLEMENTED("TODO(P3): Add implementation."); }
+void AggregationExecutor::Init() {
+  child_executor_->Init();
+  aht_.Clear();
+
+  std::vector<Tuple> tuples;
+  std::vector<RID> rids;
+  while (child_executor_->Next(&tuples, &rids, BUSTUB_BATCH_SIZE)) {
+    for (const auto &tuple : tuples) {
+      aht_.InsertCombine(MakeAggregateKey(&tuple), MakeAggregateValue(&tuple));
+    }
+  }
+
+  // For an aggregation without group by over an empty input, a single default row is produced.
+  if (aht_.Begin() == aht_.End() && plan_->GetGroupBys().empty()) {
+    aht_.InsertCombine(AggregateKey{}, AggregateValue{});
+  }
+
+  aht_iterator_ = std::make_unique<SimpleAggregationHashTable::Iterator>(aht_.Begin());
+}
 
 /**
  * Yield the next tuple batch from the aggregation.
- * @param[out] tuple_batch The next batch of tuples produced by the aggregation
- * @param[out] rid_batch The next batch of tuple RIDs produced by the aggregation
- * @param batch_size The number of tuples to be included in the batch (default: BUSTUB_BATCH_SIZE)
- * @return `true` if any tuples were produced, `false` if there are no more tuples
  */
-
 auto AggregationExecutor::Next(std::vector<bustub::Tuple> *tuple_batch, std::vector<bustub::RID> *rid_batch,
                                size_t batch_size) -> bool {
-  UNIMPLEMENTED("TODO(P3): Add implementation.");
+  tuple_batch->clear();
+  rid_batch->clear();
+
+  while (tuple_batch->size() < batch_size && *aht_iterator_ != aht_.End()) {
+    std::vector<Value> values;
+    values.reserve(aht_iterator_->Key().group_bys_.size() + aht_iterator_->Val().aggregates_.size());
+    for (const auto &value : aht_iterator_->Key().group_bys_) {
+      values.emplace_back(value);
+    }
+    for (const auto &value : aht_iterator_->Val().aggregates_) {
+      values.emplace_back(value);
+    }
+    tuple_batch->emplace_back(Tuple(std::move(values), &GetOutputSchema()));
+    rid_batch->emplace_back(RID{});
+    ++(*aht_iterator_);
+  }
+
+  return !tuple_batch->empty();
 }
 
 /** Do not use or remove this function; otherwise, you will get zero points. */

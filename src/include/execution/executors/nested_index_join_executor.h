@@ -41,5 +41,14 @@ class NestedIndexJoinExecutor : public AbstractExecutor {
  private:
   /** The nested index join plan node. */
   const NestedIndexJoinPlanNode *plan_;
+
+  /** The outer (left) child executor */
+  std::unique_ptr<AbstractExecutor> child_executor_;
+
+  /** The materialized output tuples of the join */
+  std::vector<Tuple> results_;
+
+  /** The position of the next result tuple to be emitted */
+  size_t result_pos_{0};
 };
 }  // namespace bustub

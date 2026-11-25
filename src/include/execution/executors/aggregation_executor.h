@@ -69,17 +69,40 @@ class SimpleAggregationHashTable {
    */
   void CombineAggregateValues(AggregateValue *result, const AggregateValue &input) {
     for (uint32_t i = 0; i < agg_exprs_.size(); i++) {
+      const auto &input_value = input.aggregates_[i];
       switch (agg_types_[i]) {
         case AggregationType::CountStarAggregate:
+          result->aggregates_[i] = result->aggregates_[i].Add(ValueFactory::GetIntegerValue(1));
+          break;
         case AggregationType::CountAggregate:
+          if (!input_value.IsNull()) {
+            if (result->aggregates_[i].IsNull()) {
+              result->aggregates_[i] = ValueFactory::GetIntegerValue(1);
+            } else {
+              result->aggregates_[i] = result->aggregates_[i].Add(ValueFactory::GetIntegerValue(1));
+            }
+          }
+          break;
         case AggregationType::SumAggregate:
+          if (!input_value.IsNull()) {
+            result->aggregates_[i] = result->aggregates_[i].IsNull() ? input_value
+                                                                     : result->aggregates_[i].Add(input_value);
+          }
+          break;
         case AggregationType::MinAggregate:
+          if (!input_value.IsNull()) {
+            result->aggregates_[i] = result->aggregates_[i].IsNull() ? input_value
+                                                                     : result->aggregates_[i].Min(input_value);
+          }
+          break;
         case AggregationType::MaxAggregate:
+          if (!input_value.IsNull()) {
+            result->aggregates_[i] = result->aggregates_[i].IsNull() ? input_value
+                                                                     : result->aggregates_[i].Max(input_value);
+          }
           break;
       }
     }
-
-    UNIMPLEMENTED("TODO(P3): Add implementation.");
   }
 
   /**
@@ -189,9 +212,9 @@ class AggregationExecutor : public AbstractExecutor {
   std::unique_ptr<AbstractExecutor> child_executor_;
 
   /** Simple aggregation hash table */
-  // TODO(Student): Uncomment SimpleAggregationHashTable aht_;
+  SimpleAggregationHashTable aht_;
 
   /** Simple aggregation hash table iterator */
-  // TODO(Student): Uncomment SimpleAggregationHashTable::Iterator aht_iterator_;
+  std::unique_ptr<SimpleAggregationHashTable::Iterator> aht_iterator_;
 };
 }  // namespace bustub

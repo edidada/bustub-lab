@@ -13,9 +13,11 @@
 #pragma once
 
 #include <memory>
+#include <queue>
 #include <utility>
 #include <vector>
 
+#include "execution/execution_common.h"
 #include "execution/executor_context.h"
 #include "execution/executors/abstract_executor.h"
 #include "execution/plans/seq_scan_plan.h"
@@ -52,5 +54,14 @@ class TopNExecutor : public AbstractExecutor {
   const TopNPlanNode *plan_;
   /** The child executor from which tuples are obtained */
   std::unique_ptr<AbstractExecutor> child_executor_;
+
+  /** The heap keeping the best `n` entries, with the worst entry on the front */
+  std::vector<SortEntry> entries_;
+
+  /** The sorted output entries */
+  std::vector<SortEntry> results_;
+
+  /** The position of the next result entry to be emitted */
+  size_t result_pos_{0};
 };
 }  // namespace bustub

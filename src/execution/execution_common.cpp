@@ -62,7 +62,7 @@ auto GenerateSortKey(const Tuple &tuple, const std::vector<OrderBy> &order_bys, 
   SortKey key;
   key.reserve(order_bys.size());
   for (const auto &order_by : order_bys) {
-    key.emplace_back(std::get<2>(order_by)->Evaluate(&tuple, &schema));
+    key.emplace_back(std::get<2>(order_by)->Evaluate(&tuple, schema));
   }
   return key;
 }
