@@ -33,16 +33,24 @@ auto TupleComparator::operator()(const SortEntry &entry_a, const SortEntry &entr
     const auto &value_a = key_a[i];
     const auto &value_b = key_b[i];
     const auto order_type = std::get<0>(order_bys_[i]);
+    const auto null_type = std::get<1>(order_bys_[i]);
     if (value_a.CompareExactlyEquals(value_b)) {
       continue;
     }
-    // NULL values are ordered as the smallest value.
     if (value_a.IsNull() || value_b.IsNull()) {
-      bool null_first = value_a.IsNull();
-      if (order_type == OrderByType::DESC) {
-        null_first = !null_first;
+      bool null_first = false;
+      switch (null_type) {
+        case OrderByNullType::NULLS_FIRST:
+          null_first = true;
+          break;
+        case OrderByNullType::NULLS_LAST:
+          null_first = false;
+          break;
+        default:
+          null_first = order_type != OrderByType::DESC;
+          break;
       }
-      return null_first;
+      return value_a.IsNull() ? null_first : !null_first;
     }
     bool less = value_a.CompareLessThan(value_b) == CmpBool::CmpTrue;
     if (order_type == OrderByType::DESC) {
