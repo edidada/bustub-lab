@@ -23,24 +23,30 @@ TEST(BPlusTreeDebug, DumpAfterEachRemove) {
   RID rid;
 
   auto dump = [&](const char *tag) {
-    printf("[%s] root=%d\n", tag, tree.GetRootPageId());
+    fprintf(stderr, "[%s] root=%d\n", tag, tree.GetRootPageId());
+    auto root = tree.GetRootPageId();
+    if (root == INVALID_PAGE_ID) {
+      fprintf(stderr, "  tree is empty\n");
+      return;
+    }
     auto it = tree.Begin();
     int count = 0;
     for (; !it.IsEnd(); ++it) {
-      printf("  key=%ld rid=%d\n", static_cast<long>((*it).first.GetAsInteger()), (*it).second.GetSlotNum());
+      fprintf(stderr, "  scan key=%ld\n", static_cast<long>((*it).first.GetAsInteger()));
       if (++count > 40) {
         break;
       }
     }
-    auto leaf = IndexLeaves<GenericKey<8>, RID, GenericComparator<8>>(tree.GetRootPageId(), bpm);
+    auto leaf = IndexLeaves<GenericKey<8>, RID, GenericComparator<8>>(root, bpm);
     while (leaf.Valid()) {
-      printf("  leaf size=%d keys=", (*leaf)->GetSize());
+      fprintf(stderr, "  leaf size=%d keys=", (*leaf)->GetSize());
       for (int i = 0; i < (*leaf)->GetSize(); i++) {
-        printf("%ld ", static_cast<long>((*leaf)->KeyAt(i).GetAsInteger()));
+        fprintf(stderr, "%ld ", static_cast<long>((*leaf)->KeyAt(i).GetAsInteger()));
       }
-      printf("\n");
+      fprintf(stderr, "\n");
       ++leaf;
     }
+    fprintf(stderr, "  leaves done\n");
   };
 
   std::vector<int64_t> keys = {1, 2, 3, 4, 5};
@@ -53,6 +59,7 @@ TEST(BPlusTreeDebug, DumpAfterEachRemove) {
   dump("after insert");
 
   for (auto key : std::vector<int64_t>{1, 5, 3, 4}) {
+    fprintf(stderr, "REMOVE %ld\n", static_cast<long>(key));
     index_key.SetFromInteger(key);
     tree.Remove(index_key);
     char buf[64];
@@ -60,11 +67,7 @@ TEST(BPlusTreeDebug, DumpAfterEachRemove) {
     dump(buf);
     std::vector<RID> rids;
     index_key.SetFromInteger(2);
-    if (tree.GetValue(index_key, &rids)) {
-      printf("  key 2 still present\n");
-    } else {
-      printf("  key 2 MISSING\n");
-    }
+    fprintf(stderr, "  key 2 present=%d\n", static_cast<int>(tree.GetValue(index_key, &rids)));
   }
   delete bpm;
 }
