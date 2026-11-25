@@ -34,7 +34,7 @@ TEST(BPlusTreeDebug, DumpAfterEachRemove) {
     }
     auto leaf = IndexLeaves<GenericKey<8>, RID, GenericComparator<8>>(tree.GetRootPageId(), bpm);
     while (leaf.Valid()) {
-      printf("  leaf[%d] size=%d keys=", (*leaf).GetPageId(), (*leaf)->GetSize());
+      printf("  leaf size=%d keys=", (*leaf)->GetSize());
       for (int i = 0; i < (*leaf)->GetSize(); i++) {
         printf("%ld ", static_cast<long>((*leaf)->KeyAt(i).GetAsInteger()));
       }
