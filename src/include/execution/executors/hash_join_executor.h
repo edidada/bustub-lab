@@ -46,6 +46,19 @@ struct HashJoinKey {
   }
 };
 
+/** Hasher for HashJoinKey. */
+struct HashJoinKeyHasher {
+  auto operator()(const HashJoinKey &key) const -> size_t {
+    size_t hash = 0;
+    for (const auto &value : key.values_) {
+      if (!value.IsNull()) {
+        hash = HashUtil::CombineHashes(hash, HashUtil::HashValue(&value));
+      }
+    }
+    return hash;
+  }
+};
+
 /**
  * HashJoinExecutor executes a nested-loop JOIN on two tables.
  */
@@ -73,7 +86,7 @@ class HashJoinExecutor : public AbstractExecutor {
   std::unique_ptr<AbstractExecutor> right_executor_;
 
   /** The build side hash table: join key of a right tuple to right tuples */
-  std::unordered_map<HashJoinKey, std::vector<Tuple>> hash_table_;
+  std::unordered_map<HashJoinKey, std::vector<Tuple>, HashJoinKeyHasher> hash_table_;
 
   /** The left tuples to be probed */
   std::vector<Tuple> left_tuples_;

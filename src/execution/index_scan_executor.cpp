@@ -42,12 +42,13 @@ void IndexScanExecutor::Init() {
 
   if (!plan_->pred_keys_.empty()) {
     // Point lookup by the given key values.
+    auto key_schema = index->GetKeySchema();
     std::vector<Value> key_values;
     key_values.reserve(plan_->pred_keys_.size());
+    Tuple dummy;
     for (const auto &expr : plan_->pred_keys_) {
-      key_values.emplace_back(expr->Evaluate(nullptr, nullptr));
+      key_values.emplace_back(expr->Evaluate(&dummy, *key_schema));
     }
-    auto key_schema = index->GetKeySchema();
     Tuple key(std::move(key_values), key_schema);
     index->ScanKey(key, &rids_, txn);
     return;

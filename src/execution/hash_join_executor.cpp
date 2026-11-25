@@ -58,7 +58,6 @@ void HashJoinExecutor::Init() {
   std::vector<Tuple> tuples;
   std::vector<RID> rids;
 
-  const auto &left_schema = left_executor_->GetOutputSchema();
   const auto &right_schema = right_executor_->GetOutputSchema();
 
   // Build phase: hash the right (inner) side.
