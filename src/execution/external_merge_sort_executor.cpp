@@ -121,7 +121,7 @@ auto ExternalMergeSortExecutor<K>::MergeTwoRuns(MergeSortRun &left, MergeSortRun
 
   std::vector<page_id_t> pages;
   page_id_t page_id = INVALID_PAGE_ID;
-  size_t entry_count = 0;
+
 
   auto append_tuple = [&](const Tuple &tuple) {
     bool inserted = false;
@@ -143,7 +143,7 @@ auto ExternalMergeSortExecutor<K>::MergeTwoRuns(MergeSortRun &left, MergeSortRun
         page_id = next_page_id;
       }
     }
-    entry_count++;
+
   };
 
   auto left_iter = left.Begin();
