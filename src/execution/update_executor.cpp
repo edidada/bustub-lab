@@ -79,7 +79,14 @@ auto UpdateExecutor::Next(std::vector<bustub::Tuple> *tuple_batch, std::vector<b
 
   // Pass 1: conflict check + drop the old index entries (all of them, before inserting new ones,
   // otherwise primary-key updates that shift keys collide with each other).
-  std::vector<std::pair<RID, Tuple>> live;
+  struct UpdateTarget {
+    RID rid_;
+    Tuple new_tuple_;
+    TupleMeta base_meta_;
+    Tuple base_tuple_;
+    std::optional<UndoLink> undo_link_;
+  };
+  std::vector<UpdateTarget> live;
   for (const auto &[rid, new_tuple] : targets) {
     auto [base_meta, base_tuple, undo_link] = GetTupleAndUndoLink(txn_mgr, table_heap, rid);
     if (txn != nullptr && IsWriteWriteConflict(base_meta, undo_link.value_or(UndoLink{}), txn->GetTransactionTempTs(),
@@ -90,7 +97,7 @@ auto UpdateExecutor::Next(std::vector<bustub::Tuple> *tuple_batch, std::vector<b
     if (base_meta.is_deleted_) {
       continue;
     }
-    live.emplace_back(rid, new_tuple);
+    live.push_back(UpdateTarget{rid, new_tuple, base_meta, base_tuple, undo_link});
     for (const auto &index_info : indexes) {
       auto *index = index_info->index_.get();
       auto old_key = base_tuple.KeyFromTuple(table_info_->schema_, *index->GetKeySchema(), index->GetKeyAttrs());
@@ -98,23 +105,28 @@ auto UpdateExecutor::Next(std::vector<bustub::Tuple> *tuple_batch, std::vector<b
     }
   }
 
-  // Pass 2: write the new versions.
-  for (const auto &[rid, new_tuple] : live) {
-    auto [base_meta, base_tuple, undo_link] = GetTupleAndUndoLink(txn_mgr, table_heap, rid);
+  // Pass 2: write the new versions. The base snapshot comes from pass 1, so the compare-and-swap in
+  // ModifyTuple() fails if another txn slipped in between the two passes.
+  for (const auto &target : live) {
+    auto rid = target.rid_;
     if (txn == nullptr) {
-      table_heap->UpdateTupleInPlace(TupleMeta{base_meta.ts_, false}, new_tuple, rid);
+      table_heap->UpdateTupleInPlace(TupleMeta{target.base_meta_.ts_, false}, target.new_tuple_, rid);
     } else {
-      ModifyTuple(txn_mgr, txn, table_heap, plan_->GetTableOid(), rid, &table_info_->schema_, base_tuple, base_meta,
-                  undo_link, &new_tuple);
+      if (!ModifyTuple(txn_mgr, txn, table_heap, plan_->GetTableOid(), rid, &table_info_->schema_,
+                       target.base_tuple_, target.base_meta_, target.undo_link_, &target.new_tuple_)) {
+        txn->SetTainted();
+        throw ExecutionException("write-write conflict on update");
+      }
     }
     count++;
   }
 
   // Pass 3: add the new index entries.
-  for (const auto &[rid, new_tuple] : live) {
+  for (const auto &target : live) {
+    auto rid = target.rid_;
     for (const auto &index_info : indexes) {
       auto *index = index_info->index_.get();
-      auto new_key = new_tuple.KeyFromTuple(table_info_->schema_, *index->GetKeySchema(), index->GetKeyAttrs());
+      auto new_key = target.new_tuple_.KeyFromTuple(table_info_->schema_, *index->GetKeySchema(), index->GetKeyAttrs());
       index->InsertEntry(new_key, rid, txn);
     }
   }

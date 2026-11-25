@@ -89,8 +89,11 @@ auto DeleteExecutor::Next(std::vector<bustub::Tuple> *tuple_batch, std::vector<b
     if (txn == nullptr) {
       table_heap->UpdateTupleMeta(TupleMeta{base_meta.ts_, true}, rid);
     } else {
-      ModifyTuple(txn_mgr, txn, table_heap, plan_->GetTableOid(), rid, &table_info->schema_, base_tuple, base_meta,
-                  undo_link, nullptr);
+      if (!ModifyTuple(txn_mgr, txn, table_heap, plan_->GetTableOid(), rid, &table_info->schema_, base_tuple,
+                       base_meta, undo_link, nullptr)) {
+        txn->SetTainted();
+        throw ExecutionException("write-write conflict on delete");
+      }
     }
     count++;
   }

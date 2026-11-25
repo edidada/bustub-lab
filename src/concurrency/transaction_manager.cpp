@@ -130,11 +130,35 @@ auto TransactionManager::Commit(Transaction *txn) -> bool {
       table_heap->UpdateTupleInPlaceWithLockAcquired(meta, tuple, rid, page.AsMut<TablePage>());
 
       if (meta.is_deleted_) {
-        // The deletion is now durable: drop the index entries so later scans do not resurrect this key.
-        for (const auto &index_info : catalog_->GetTableIndexes(table_info->name_)) {
-          auto key = tuple.KeyFromTuple(table_info->schema_, index_info->key_schema_,
-                                        index_info->index_->GetKeyAttrs());
-          index_info->index_->DeleteEntry(key, rid, txn);
+        // The deletion is durable, but an older snapshot may still need to find this row *through the index*.
+        // Keep the index entries alive as long as another running txn can see the pre-deletion version.
+        auto undo_link = GetUndoLink(rid);
+        timestamp_t old_ts = 0;
+        bool has_undo_log = false;
+        if (undo_link.has_value() && undo_link->IsValid()) {
+          auto log = GetUndoLogOptional(*undo_link);
+          if (log.has_value()) {
+            old_ts = log->ts_;
+            has_undo_log = true;
+          }
+        }
+        bool other_reader_needs_entry = false;
+        for (const auto &[read_ts, count] : running_txns_.current_reads_) {
+          auto readers = count - (read_ts == txn->read_ts_ ? 1 : 0);
+          if (readers <= 0) {
+            continue;
+          }
+          if (!has_undo_log || read_ts >= old_ts) {
+            other_reader_needs_entry = true;
+            break;
+          }
+        }
+        if (!other_reader_needs_entry) {
+          for (const auto &index_info : catalog_->GetTableIndexes(table_info->name_)) {
+            auto key = tuple.KeyFromTuple(table_info->schema_, index_info->key_schema_,
+                                          index_info->index_->GetKeyAttrs());
+            index_info->index_->DeleteEntry(key, rid, txn);
+          }
         }
       }
     }

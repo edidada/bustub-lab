@@ -322,29 +322,43 @@ auto IsWriteWriteConflict(const TupleMeta &meta, const UndoLink &undo_link, time
   return meta.ts_ >= TXN_START_ID || meta.ts_ > read_ts;
 }
 
-void ModifyTuple(TransactionManager *txn_mgr, Transaction *txn, TableHeap *table_heap, table_oid_t oid, RID rid,
+auto ModifyTuple(TransactionManager *txn_mgr, Transaction *txn, TableHeap *table_heap, table_oid_t oid, RID rid,
                  const Schema *schema, const Tuple &base_tuple, const TupleMeta &base_meta,
-                 std::optional<UndoLink> undo_link, const Tuple *target_tuple) {
+                 std::optional<UndoLink> undo_link, const Tuple *target_tuple) -> bool {
   const auto temp_ts = txn->GetTransactionTempTs();
+  // Only write if nobody else touched the tuple since we read it.
+  auto expected_ts = base_meta.ts_;
+  auto check = [expected_ts](const TupleMeta &meta, const Tuple & /*tuple*/, RID /*rid*/,
+                             std::optional<UndoLink> /*link*/) { return meta.ts_ == expected_ts; };
   const bool deleted = target_tuple == nullptr;
   // A tombstone must keep the original tuple bytes: TablePage requires the size to stay the same.
   auto new_tuple = deleted ? base_tuple : *target_tuple;
 
   if (base_meta.ts_ == temp_ts && (!undo_link.has_value() || !undo_link->IsValid())) {
     // the tuple was inserted by this txn: no undo log is needed
-    UpdateTupleAndUndoLink(txn_mgr, rid, std::nullopt, table_heap, txn, TupleMeta{temp_ts, deleted}, new_tuple);
+    if (!UpdateTupleAndUndoLink(txn_mgr, rid, std::nullopt, table_heap, txn, TupleMeta{temp_ts, deleted}, new_tuple,
+                                std::move(check))) {
+      return false;
+    }
   } else if (base_meta.ts_ == temp_ts && undo_link.has_value() && undo_link->IsValid()) {
     auto log = txn_mgr->GetUndoLog(*undo_link);
     auto new_log = GenerateUpdatedUndoLog(schema, &base_tuple, target_tuple, log);
     txn->ModifyUndoLog(undo_link->prev_log_idx_, new_log);
-    UpdateTupleAndUndoLink(txn_mgr, rid, undo_link, table_heap, txn, TupleMeta{temp_ts, deleted}, new_tuple);
+    if (!UpdateTupleAndUndoLink(txn_mgr, rid, undo_link, table_heap, txn, TupleMeta{temp_ts, deleted}, new_tuple,
+                                std::move(check))) {
+      return false;
+    }
   } else {
     auto prev = undo_link.value_or(UndoLink{});
     auto new_log = GenerateNewUndoLog(schema, &base_tuple, target_tuple, base_meta.ts_, prev);
     auto link = txn->AppendUndoLog(new_log);
-    UpdateTupleAndUndoLink(txn_mgr, rid, link, table_heap, txn, TupleMeta{temp_ts, deleted}, new_tuple);
+    if (!UpdateTupleAndUndoLink(txn_mgr, rid, link, table_heap, txn, TupleMeta{temp_ts, deleted}, new_tuple,
+                                std::move(check))) {
+      return false;
+    }
   }
   txn->AppendWriteSet(oid, rid);
+  return true;
 }
 
 auto GetTupleVisibleToTxn(TransactionManager *txn_mgr, TableHeap *table_heap, RID rid, const Schema *schema,
